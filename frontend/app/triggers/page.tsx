@@ -48,6 +48,7 @@ type Row = {
   premio_anual?: number;
   valor_credito?: number;
   dias_ate?: number;
+  gestor?: string | null;
 };
 
 type PreviewResp = {
@@ -296,7 +297,7 @@ function ActivitySection({
               <th className="py-2">Nome</th>
               <th className="py-2">Detalhe</th>
               {isLead && <th className="py-2">Origem</th>}
-              {isLead && <th className="py-2">Gestor</th>}
+              <th className="py-2">Consultor</th>
               <th className="py-2">Contacto</th>
               <th className="py-2"></th>
             </tr>
@@ -347,7 +348,7 @@ function ActivitySection({
                   )}
                 </td>
                 {isLead && <td className="py-3 text-ink-700">{(r as any).origem || '—'}</td>}
-                {isLead && <td className="py-3 text-ink-700">{(r as any).gestor || '—'}</td>}
+                <td className="py-3 text-ink-700">{r.gestor || '—'}</td>
                 <td className="py-3 text-ink-700 font-mono text-xs">{r.telefone || '—'}</td>
                 <td className="py-3 text-right">
                   <button className="btn-primary" onClick={() => onPreview(r, trigger)}>Pré-visualizar</button>

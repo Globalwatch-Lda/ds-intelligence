@@ -153,6 +153,22 @@ def _select_all(sb, table: str, columns: str, page_size: int = 1000, *, scope: d
     return rows
 
 
+def _manager_by_customer(sb) -> dict[int, str]:
+    """Map each customer_crm_id → the manager (consultor) of their most recent
+    processo. Used to surface the responsible consultant on triggers whose base
+    table (clientes_real) carries no manager column (aniversário, escrituras)."""
+    procs = _select_all(sb, "processos_real", "customer_crm_id, manager_name, updated_on_crm")
+    latest: dict[int, dict] = {}
+    for p in procs:
+        cid = p.get("customer_crm_id")
+        if not cid or not p.get("manager_name"):
+            continue
+        prior = latest.get(cid)
+        if not prior or (p.get("updated_on_crm") or "") > (prior.get("updated_on_crm") or ""):
+            latest[cid] = p
+    return {cid: p["manager_name"] for cid, p in latest.items()}
+
+
 # ----------------------------------------------------------------- templates
 def _template(trigger: TriggerType, ctx: dict) -> str:
     nome = (ctx.get("nome") or "").split(" ")[0] or "amigo(a)"
@@ -242,6 +258,7 @@ def list_trigger_rows(
 
     if trigger == "aniversario":
         clientes = _select_all(sb, "clientes_real", "crm_id, name, telephone, date_of_birth")
+        mgr_by_customer = _manager_by_customer(sb)
         out = []
         for c in clientes:
             dn = _parse(c.get("date_of_birth"))
@@ -266,6 +283,7 @@ def list_trigger_rows(
                 "cliente_crm_id": c["crm_id"],
                 "nome": c["name"],
                 "telefone": c.get("telephone"),
+                "gestor": mgr_by_customer.get(c["crm_id"]),
                 "data": by.isoformat(),
                 "dias_ate": days_until,
                 "data_source": "live",
@@ -279,7 +297,7 @@ def list_trigger_rows(
         cli_by_id = {c["crm_id"]: c for c in clientes}
         processos = _select_all(
             sb, "processos_real",
-            "crm_id, customer_crm_id, state_name, updated_on_crm, financing_amount"
+            "crm_id, customer_crm_id, state_name, updated_on_crm, financing_amount, manager_name"
         )
         ganho_by_customer: dict[int, dict] = {}
         for p in processos:
@@ -309,6 +327,7 @@ def list_trigger_rows(
                 "processo_crm_id": p["crm_id"],
                 "nome": c.get("name"),
                 "telefone": c.get("telephone"),
+                "gestor": p.get("manager_name"),
                 "data_escritura": esc.isoformat(),
                 "aniversario": anniv.isoformat(),
                 "valor_credito": p.get("financing_amount"),
@@ -323,6 +342,7 @@ def list_trigger_rows(
             "id, cliente_id, ramo, seguradora, data_vencimento, premio_anual, consultor_id"
         ).gte("data_vencimento", lo.isoformat()).lte("data_vencimento", hi.isoformat()).execute().data
         cli = {c["id"]: c for c in sb.table("clientes").select("id, nome, telefone").execute().data}
+        ges = {g["id"]: g["nome"] for g in sb.table("gestores").select("id, nome").execute().data}
         out = []
         for a in apols:
             c = cli.get(a["cliente_id"]) or {}
@@ -331,6 +351,7 @@ def list_trigger_rows(
                 "cliente_id": a["cliente_id"],
                 "nome": c.get("nome"),
                 "telefone": c.get("telefone"),
+                "gestor": ges.get(a.get("consultor_id")),
                 "ramo": a.get("ramo"),
                 "seguradora": a.get("seguradora"),
                 "data_vencimento": a.get("data_vencimento"),
@@ -346,6 +367,7 @@ def list_trigger_rows(
             "id, cliente_id, taxa_fixa_ate, taxa_tipo, valor_credito, consultor_id"
         ).gte("taxa_fixa_ate", lo.isoformat()).lte("taxa_fixa_ate", hi.isoformat()).execute().data
         cli = {c["id"]: c for c in sb.table("clientes").select("id, nome, telefone").execute().data}
+        ges = {g["id"]: g["nome"] for g in sb.table("gestores").select("id, nome").execute().data}
         out = []
         for p in procs:
             c = cli.get(p["cliente_id"]) or {}
@@ -354,6 +376,7 @@ def list_trigger_rows(
                 "cliente_id": p["cliente_id"],
                 "nome": c.get("nome"),
                 "telefone": c.get("telefone"),
+                "gestor": ges.get(p.get("consultor_id")),
                 "taxa_fixa_ate": p.get("taxa_fixa_ate"),
                 "taxa_tipo": p.get("taxa_tipo"),
                 "valor_credito": p.get("valor_credito"),
@@ -366,7 +389,7 @@ def list_trigger_rows(
             sb, "processos_real",
             "crm_id, customer_crm_id, customer_name, customer_telephone, "
             "state_id, state_name, docs_mandatory, docs_uploaded, docs_validated, "
-            "updated_on_crm, type_name",
+            "updated_on_crm, type_name, manager_name",
             scope=scope,
         )
         d_minus_7 = today - timedelta(days=7)
@@ -415,6 +438,7 @@ def list_trigger_rows(
                 "processo_crm_id": p["crm_id"],
                 "nome": p.get("customer_name"),
                 "telefone": p.get("customer_telephone"),
+                "gestor": p.get("manager_name"),
                 "documentos_em_falta": [],
                 "documentos_em_falta_count": falta,
                 "docs_mandatory": mandatory,
