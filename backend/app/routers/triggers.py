@@ -257,7 +257,9 @@ def list_trigger_rows(
         rng_lo, rng_hi = rng_hi, rng_lo
 
     if trigger == "aniversario":
-        clientes = _select_all(sb, "clientes_real", "crm_id, name, telephone, date_of_birth")
+        clientes = _select_all(sb, "clientes_real", "crm_id, name, telephone, date_of_birth, manager_name")
+        # Primary source is the customer's own manager (100% populated in the CRM);
+        # the process-based lookup stays only as a fallback for the rare null.
         mgr_by_customer = _manager_by_customer(sb)
         out = []
         for c in clientes:
@@ -283,7 +285,7 @@ def list_trigger_rows(
                 "cliente_crm_id": c["crm_id"],
                 "nome": c["name"],
                 "telefone": c.get("telephone"),
-                "gestor": mgr_by_customer.get(c["crm_id"]),
+                "gestor": c.get("manager_name") or mgr_by_customer.get(c["crm_id"]),
                 "data": by.isoformat(),
                 "dias_ate": days_until,
                 "data_source": "live",

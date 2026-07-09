@@ -24,6 +24,7 @@ ORDER = [
     "011_source_accounts_array.sql",
     "012_acesso_loja_toda.sql",
     "013_perfis_loja.sql",
+    "014_clientes_manager.sql",
 ]
 
 MIG_DIR = Path(__file__).resolve().parents[1] / "migrations"
