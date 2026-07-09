@@ -33,6 +33,8 @@ def normalise(row: dict) -> dict:
         "date_of_birth": row.get("dateofbirth"),
         "country_id": row.get("countryId"),
         "identity_card": row.get("identityCard"),
+        "manager_name": row.get("managerName"),
+        "manager_crm_id": row.get("managerId"),
         "created_on_crm": row.get("createdon"),
         "raw": row,
     }
