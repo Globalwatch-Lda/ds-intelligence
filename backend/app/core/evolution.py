@@ -92,3 +92,20 @@ def logout_instance(instance: str) -> dict:
 def send_text(instance: str, number: str, text: str) -> dict:
     """Send a text message through a specific instance (the sender's number)."""
     return _request("POST", f"/message/sendText/{instance}", {"number": number, "text": text})
+
+
+def instance_profile(instance: str) -> dict:
+    """The instance's WhatsApp profile — {profileName, numero} — i.e. how it appears
+    to recipients. Empty dict if not found."""
+    r = _request("GET", "/instance/fetchInstances")
+    if not r.get("ok"):
+        return {}
+    for i in r.get("data") or []:
+        name = i.get("name") or (i.get("instance") or {}).get("instanceName")
+        if name == instance:
+            jid = i.get("ownerJid") or (i.get("instance") or {}).get("owner") or ""
+            return {
+                "profileName": i.get("profileName") or (i.get("instance") or {}).get("profileName"),
+                "numero": jid.split("@")[0] if jid else None,
+            }
+    return {}

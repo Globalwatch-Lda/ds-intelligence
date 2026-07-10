@@ -46,16 +46,24 @@ def enqueue_many(
     ref_id: str | None = None,
     criado_por: str | None = None,
     canal_conta: str | None = None,
+    quando: str | None = None,
 ) -> dict:
     """Queue per-recipient messages (each with its own corpo/assunto) for one
     channel, spacing batches per config. `itens`: [{destinatario, corpo, assunto?}].
     `canal_conta` (WhatsApp) forces a specific sender instance; if omitted it is
-    derived from criado_por."""
+    derived from criado_por. `quando` (ISO) schedules the send for a future time
+    (the dispatcher only delivers once agendado_para is reached)."""
     sb = supabase()
     cfg = _cfg(sb, canal)
     batch = max(1, int(cfg["batch_size"]))
     interval = max(0, int(cfg["intervalo_segundos"]))
     now = datetime.now(timezone.utc)
+    if quando:
+        try:
+            base = datetime.fromisoformat(str(quando).replace("Z", "+00:00"))
+            now = base if base.tzinfo else base.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
 
     # For WhatsApp, freeze the sender's own instance now so each message goes out
     # from their number even if their profile changes later.
