@@ -53,7 +53,7 @@ export default function ContactosPage() {
   }
 
   const { data: contactos, mutate: refreshContactos } = useSWR<{ contactos: Contacto[] }>(
-    selectedId ? `/api/broadcasts/contactos?consultor_id=${selectedId}` : null,
+    selectedId ? `/api/broadcasts/contactos?consultor_id=${encodeURIComponent(selectedId)}` : null,
     api
   );
 
