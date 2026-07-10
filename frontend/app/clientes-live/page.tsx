@@ -67,8 +67,7 @@ export default function ClientesLive() {
           <h1 className="text-2xl font-semibold text-ink-900">Clientes em direto do CRM</h1>
         </div>
         <p className="text-ink-400 mt-1 text-sm">
-          Espelho de <code className="text-xs">crm.dsicredito.pt</code> · clientes da loja inteira ·
-          processos no âmbito: <span className="font-medium text-ink-600">{scopeLbl}</span>
+          Âmbito: <span className="font-medium text-ink-600">{scopeLbl}</span>
         </p>
       </section>
 

@@ -288,12 +288,6 @@ export default function RecapPage() {
         </p>
       </section>
 
-      <section className="card bg-ink-50/60">
-        <p className="text-xs text-ink-500">
-          v1 do recap — operador-disparado. Auto-envio sexta-feira / segunda por aprovar com DS. Inclui apenas a slice
-          do consultor cuja sessão está activa no CrediDesk; um login coordenador desbloqueia visão total da loja.
-        </p>
-      </section>
     </div>
   );
 }
