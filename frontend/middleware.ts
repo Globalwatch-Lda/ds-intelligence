@@ -19,8 +19,8 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Password recovery must be reachable when logged out (link opened from email).
-  if (pathname === '/reset') {
+  // Public pages reachable when logged out (links opened from email).
+  if (pathname === '/reset' || pathname === '/unsubscribe') {
     return NextResponse.next();
   }
 

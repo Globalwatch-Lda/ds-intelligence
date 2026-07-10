@@ -35,17 +35,16 @@ def _user_evolution_instance(sb, username: str | None) -> str | None:
     return (row or {}).get("evolution_instance")
 
 
-def enqueue(
+def enqueue_many(
     canal: str,
-    destinatarios: list[str],
-    corpo: str,
-    assunto: str | None = None,
+    itens: list[dict],
     ref_tipo: str | None = None,
     ref_id: str | None = None,
     criado_por: str | None = None,
 ) -> dict:
-    """Queue messages for one channel, spacing batches per config. Returns
-    {'enqueued': n, 'canal': canal}."""
+    """Queue per-recipient messages (each with its own corpo/assunto) for one
+    channel, spacing batches per config. `itens`: [{destinatario, corpo, assunto?}].
+    Used when the body is personalised (e.g. a per-client unsubscribe link)."""
     sb = supabase()
     cfg = _cfg(sb, canal)
     batch = max(1, int(cfg["batch_size"]))
@@ -57,16 +56,14 @@ def enqueue(
     canal_conta = _user_evolution_instance(sb, criado_por) if canal == "whatsapp_evolution" else None
 
     rows = []
-    for i, dest in enumerate(destinatarios):
-        if not dest:
-            continue
+    for i, it in enumerate(x for x in itens if x.get("destinatario")):
         offset = (i // batch) * interval
         rows.append(
             {
                 "canal": canal,
-                "destinatario": dest,
-                "assunto": assunto,
-                "corpo": corpo,
+                "destinatario": it["destinatario"],
+                "assunto": it.get("assunto"),
+                "corpo": it.get("corpo", ""),
                 "ref_tipo": ref_tipo,
                 "ref_id": ref_id,
                 "criado_por": criado_por,
@@ -76,10 +73,23 @@ def enqueue(
             }
         )
     if rows:
-        # Insert in chunks to stay well under any payload limit.
         for k in range(0, len(rows), 500):
             sb.table("envios").insert(rows[k : k + 500]).execute()
     return {"enqueued": len(rows), "canal": canal}
+
+
+def enqueue(
+    canal: str,
+    destinatarios: list[str],
+    corpo: str,
+    assunto: str | None = None,
+    ref_tipo: str | None = None,
+    ref_id: str | None = None,
+    criado_por: str | None = None,
+) -> dict:
+    """Queue the SAME body to many recipients (spaced per config)."""
+    itens = [{"destinatario": d, "corpo": corpo, "assunto": assunto} for d in destinatarios]
+    return enqueue_many(canal, itens, ref_tipo=ref_tipo, ref_id=ref_id, criado_por=criado_por)
 
 
 def process_due(max_per_run: int = 200) -> dict:

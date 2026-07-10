@@ -21,8 +21,9 @@ from pydantic import BaseModel
 
 from ..config import settings
 from ..core.channels import CHANNELS
-from ..core.dispatcher import enqueue
+from ..core.dispatcher import enqueue, enqueue_many
 from ..core.mailer import branded_email
+from ..core.tokens import make_unsub_token
 from ..core.wa_client import is_demo_recipient
 from ..db import supabase
 from .auth import COOKIE_NAME, token_user
@@ -321,14 +322,16 @@ def _opted_in_recipients(sb) -> list[dict]:
     return out
 
 
-def _opted_in_emails(sb) -> list[str]:
-    """Emails of clientes who authorised marketing contact and have a usable email."""
-    out: list[str] = []
+def _opted_in_emails(sb) -> list[dict]:
+    """Clientes who authorised marketing contact and have a usable email —
+    [{email, crm_id}], de-duplicated by email (for per-recipient unsubscribe links)."""
+    out: list[dict] = []
+    seen: set[str] = set()
     page, PAGE = 0, 1000
     while True:
         res = (
             sb.table("clientes_real")
-            .select("email")
+            .select("email, crm_id")
             .eq("authorized_contact", True)
             .range(page * PAGE, page * PAGE + PAGE - 1)
             .execute()
@@ -336,14 +339,13 @@ def _opted_in_emails(sb) -> list[str]:
         batch = res.data or []
         for r in batch:
             e = (r.get("email") or "").strip()
-            if e and "@" in e:
-                out.append(e)
+            if e and "@" in e and e not in seen:
+                seen.add(e)
+                out.append({"email": e, "crm_id": r.get("crm_id")})
         if len(batch) < PAGE:
             break
         page += 1
-    # de-dup, preserve order
-    seen: set[str] = set()
-    return [e for e in out if not (e in seen or seen.add(e))]
+    return out
 
 
 class SendBody(BaseModel):
@@ -377,23 +379,29 @@ def send_newsletter(body: SendBody, request: Request):
     por_canal: dict[str, int] = {}
     for canal in canais:
         if canal == "email":
-            dests = _opted_in_emails(sb)
-            corpo = branded_email(
-                nl["titulo"],
-                "Partilhamos consigo a mais recente newsletter da DS Crédito. "
-                "Clique abaixo para a ler na íntegra.",
-                cta_label="Ler a newsletter",
-                cta_url=link,
-            )
             assunto = f"{nl['titulo']} — {settings.LOJA_NAME}"
+            # Personalise each email with the client's own unsubscribe link.
+            itens = [
+                {
+                    "destinatario": r["email"],
+                    "assunto": assunto,
+                    "corpo": branded_email(
+                        nl["titulo"],
+                        "Partilhamos consigo a mais recente newsletter da DS Crédito. "
+                        "Clique abaixo para a ler na íntegra.",
+                        cta_label="Ler a newsletter",
+                        cta_url=link,
+                        unsub_url=f"{settings.APP_BASE_URL}/unsubscribe?t={make_unsub_token(r['crm_id'])}",
+                    ),
+                }
+                for r in _opted_in_emails(sb)
+                if r.get("crm_id") is not None
+            ]
+            r = enqueue_many("email", itens, ref_tipo="newsletter", ref_id=str(nl["id"]), criado_por=user)
         else:  # sms / whatsapp_evolution → plain text + link
             dests = [r["e164"] for r in _opted_in_recipients(sb)]
             corpo = f"📬 {teaser}\n\nLeia na íntegra: {link}"
-            assunto = None
-        r = enqueue(
-            canal, dests, corpo, assunto=assunto,
-            ref_tipo="newsletter", ref_id=str(nl["id"]), criado_por=user,
-        )
+            r = enqueue(canal, dests, corpo, ref_tipo="newsletter", ref_id=str(nl["id"]), criado_por=user)
         por_canal[canal] = r["enqueued"]
         total += r["enqueued"]
 

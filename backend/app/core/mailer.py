@@ -45,7 +45,13 @@ def send_email(to: str | None, subject: str, html_body: str, text_body: str | No
         return {"delivered": False, "error": str(e)}
 
 
-def branded_email(titulo: str, corpo_html: str, cta_label: str | None = None, cta_url: str | None = None) -> str:
+def branded_email(
+    titulo: str,
+    corpo_html: str,
+    cta_label: str | None = None,
+    cta_url: str | None = None,
+    unsub_url: str | None = None,
+) -> str:
     """Wrap content in a simple DS Crédito-branded HTML shell (inline styles for
     email-client compatibility). The logo is referenced from the public site; if the
     asset is missing the alt text ("DS Crédito") shows instead."""
@@ -58,6 +64,12 @@ def branded_email(titulo: str, corpo_html: str, cta_label: str | None = None, ct
             f'<a href="{cta_url}" style="background:{red};color:#ffffff;text-decoration:none;'
             f'display:inline-block;padding:12px 22px;border-radius:8px;font-weight:600;">{cta_label}</a>'
             f"</td></tr>"
+        )
+    unsub = ""
+    if unsub_url:
+        unsub = (
+            f'<br><span style="color:#8e8e93;">Não deseja receber estas comunicações? '
+            f'<a href="{unsub_url}" style="color:#8e8e93;">Cancelar subscrição</a>.</span>'
         )
     return f"""\
 <!doctype html>
@@ -76,7 +88,7 @@ def branded_email(titulo: str, corpo_html: str, cta_label: str | None = None, ct
           </table>
         </td></tr>
         <tr><td style="padding:16px 28px;border-top:1px solid #ececee;font-size:12px;color:#8e8e93;">
-          {settings.LOJA_NAME}
+          {settings.LOJA_NAME}{unsub}
         </td></tr>
       </table>
     </td></tr>
