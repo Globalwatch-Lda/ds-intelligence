@@ -22,24 +22,43 @@ from pydantic import BaseModel
 
 from ..core.crypto import encrypt_secret, hash_password
 from ..core.names import fix_name
-from ..core.scope import apply_scope, user_scope
+from ..core.scope import acting_data_scope, apply_scope, has_cap, require_cap, user_scope
 from ..db import supabase
 from .auth import COOKIE_NAME, token_user
 
 router = APIRouter()
-
-VALID_ROLES = {"diretor_loja", "diretor_comercial", "comercial"}
-MANAGEABLE_ROLES = {"diretor_comercial", "comercial"}  # diretor_loja never manages another diretor_loja
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _valid_roles(sb) -> set[str]:
+    """The set of assignable profile keys (ds.perfis.chave)."""
+    return {r["chave"] for r in sb.table("perfis").select("chave").execute().data or []}
+
+
+def _equipa_lider(sb, equipa_id: int | None) -> int | None:
+    """The platform_users.id of a team's leader (for keeping manager_id in sync)."""
+    if not equipa_id:
+        return None
+    r = sb.table("equipas").select("lider_id").eq("id", equipa_id).limit(1).execute().data
+    return (r or [{}])[0].get("lider_id")
+
+
+def _acting_led_team(sb, acting: dict) -> int | None:
+    """The single team the acting user leads, if exactly one (used to auto-assign a
+    consultor created by a team-level manager)."""
+    if not acting.get("id"):
+        return None
+    rows = sb.table("equipas").select("id").eq("lider_id", acting["id"]).execute().data or []
+    return rows[0]["id"] if len(rows) == 1 else None
+
+
 # ---- acting user + permissions ------------------------------------------
 def _acting_user(request: Request) -> dict:
     """The logged-in user as {id, username, role, manager_id}. Env-only admin
-    logins (ds/amin, no platform_users row) act as diretor_loja."""
+    logins (ds/amin, no platform_users row) act as an administrator."""
     username = token_user(request.cookies.get(COOKIE_NAME))
     row = None
     if username:
@@ -58,27 +77,43 @@ def _acting_user(request: Request) -> dict:
         except Exception:
             row = None
     if not row:
-        return {"id": None, "username": username, "role": "diretor_loja", "manager_id": None}
+        return {"id": None, "username": username, "role": "administrador", "manager_id": None}
     return row
 
 
-def _can_manage(acting: dict, target: dict) -> bool:
-    """Whether `acting` may view/edit `target`. Diretor de Loja can see/edit anyone
-    (deleting a diretor_loja is blocked separately); diretor_comercial only their
-    own team's comerciais."""
-    if acting["role"] == "diretor_loja":
+def _is_loja_manager(request: Request, acting: dict) -> bool:
+    """A loja-wide manager: can manage every user in the loja. True for an
+    Administrador, or anyone whose profile has `users.manage` + loja data scope."""
+    if acting["role"] == "administrador":
         return True
-    if acting["role"] == "diretor_comercial":
-        return target.get("role") == "comercial" and target.get("manager_id") == acting["id"]
-    return False
+    return has_cap(request, "users.manage") and acting_data_scope(request) == "loja"
 
 
-def _can_create(acting: dict, role: str) -> bool:
-    if acting["role"] == "diretor_loja":
-        return role in MANAGEABLE_ROLES
-    if acting["role"] == "diretor_comercial":
-        return role == "comercial"
-    return False
+def _can_manage(request: Request, acting: dict, target: dict) -> bool:
+    """Whether `acting` may view/edit `target`."""
+    if not has_cap(request, "users.manage"):
+        return False
+    if acting["role"] == "administrador":
+        return True
+    # Only an Administrador may touch another Administrador account.
+    if target.get("role") == "administrador":
+        return False
+    if _is_loja_manager(request, acting):
+        return True
+    # Team-level manager (e.g. Diretor Comercial): only their own team.
+    return target.get("manager_id") == acting["id"]
+
+
+def _can_assign_role(request: Request, acting: dict, role: str) -> bool:
+    """Whether `acting` may create a user with / assign the profile `role`."""
+    if not has_cap(request, "users.manage"):
+        return False
+    if role == "administrador":
+        return acting["role"] == "administrador"
+    if _is_loja_manager(request, acting):
+        return True
+    # Team-level managers can only ever create/assign Consultores.
+    return role == "consultor"
 
 
 def _get_user_or_404(sb, user_id: int, columns: str) -> dict:
@@ -99,16 +134,23 @@ def _username_taken(sb, username: str, exclude_id: int | None = None) -> bool:
 # ---- list / read ---------------------------------------------------------
 @router.get("/users")
 def list_users(request: Request):
-    """Users the acting profile may see: diretor_loja → all; diretor_comercial →
-    self + team; comercial → self."""
+    """Users the acting profile may see: loja-manager → all; team-manager →
+    self + team; otherwise → self."""
     acting = _acting_user(request)
     sb = supabase()
-    q = sb.table("platform_users").select("id, username, nome, role, manager_id, is_active").order("id")
-    if acting["role"] == "diretor_comercial":
+    loja_manager = _is_loja_manager(request, acting)
+    can_manage = has_cap(request, "users.manage")
+    q = sb.table("platform_users").select("id, username, nome, role, manager_id, equipa_id, is_active").order("id")
+    if loja_manager:
+        pass  # all users in the loja
+    elif can_manage:
         q = q.or_(f"id.eq.{acting['id']},manager_id.eq.{acting['id']}")
-    elif acting["role"] != "diretor_loja":
+    else:
         q = q.eq("id", acting["id"])
-    return {"users": q.execute().data or [], "acting": {"id": acting["id"], "role": acting["role"]}}
+    return {
+        "users": q.execute().data or [],
+        "acting": {"id": acting["id"], "role": acting["role"], "loja_manager": loja_manager, "can_manage": can_manage},
+    }
 
 
 def _shape_user(row: dict) -> dict:
@@ -120,9 +162,11 @@ def _shape_user(row: dict) -> dict:
         "email": row.get("email"),
         "role": row.get("role"),
         "manager_id": row.get("manager_id"),
+        "equipa_id": row.get("equipa_id"),
         "manager_crm_id": row.get("manager_crm_id"),
         "crm_username": row.get("crm_username"),
         "crm_password_set": bool(row.get("crm_password_enc")),
+        "can_newsletter": bool(row.get("can_newsletter")),
     }
 
 
@@ -132,9 +176,9 @@ def get_user(user_id: int, request: Request):
     sb = supabase()
     target = _get_user_or_404(
         sb, user_id,
-        "id, username, nome, telefone, email, role, manager_id, manager_crm_id, crm_username, crm_password_enc",
+        "id, username, nome, telefone, email, role, manager_id, equipa_id, manager_crm_id, crm_username, crm_password_enc, can_newsletter",
     )
-    if not (acting["id"] == target["id"] or _can_manage(acting, target)):
+    if not (acting["id"] == target["id"] or _can_manage(request, acting, target)):
         raise HTTPException(403, "Sem permissão para ver este utilizador.")
     return _shape_user(target)
 
@@ -148,22 +192,31 @@ class UserIn(BaseModel):
     email: str | None = None
     role: str | None = None
     manager_id: int | None = None
+    equipa_id: int | None = None
     manager_crm_id: int | None = None
     crm_username: str | None = None
     crm_password: str | None = None
+    can_newsletter: bool | None = None
 
 
 @router.post("/users")
 def create_user(body: UserIn, request: Request):
     acting = _acting_user(request)
     sb = supabase()
-    role = body.role or "comercial"
+    role = body.role or "consultor"
     manager_id = body.manager_id
-    # A diretor_comercial can only spawn comerciais on their own team.
-    if acting["role"] == "diretor_comercial":
-        role = "comercial"
+    equipa_id = body.equipa_id
+    # A team-level manager (e.g. Diretor Comercial) can only spawn Consultores on
+    # their own team; loja-level managers assign freely.
+    if not _is_loja_manager(request, acting):
+        role = "consultor"
+        equipa_id = _acting_led_team(sb, acting)
         manager_id = acting["id"]
-    if role not in VALID_ROLES or not _can_create(acting, role):
+    # equipa_id is the source of truth for team membership; manager_id mirrors the
+    # team's leader so the existing management/permission logic keeps working.
+    if equipa_id:
+        manager_id = _equipa_lider(sb, equipa_id)
+    if role not in _valid_roles(sb) or not _can_assign_role(request, acting, role):
         raise HTTPException(403, "Sem permissão para criar este perfil.")
     username = (body.username or "").strip()
     if not username or not body.password:
@@ -178,11 +231,14 @@ def create_user(body: UserIn, request: Request):
         "email": body.email,
         "role": role,
         "manager_id": manager_id,
+        "equipa_id": equipa_id,
         "manager_crm_id": body.manager_crm_id,
         "password_hash": h,
         "password_salt": salt,
         "crm_username": body.crm_username,
         "is_active": True,
+        # Newsletter authoring is a loja-manager grant only.
+        "can_newsletter": bool(body.can_newsletter) if _is_loja_manager(request, acting) else False,
     }
     if body.crm_password:
         row["crm_password_enc"] = encrypt_secret(body.crm_password)
@@ -196,7 +252,7 @@ def update_user(user_id: int, body: UserIn, request: Request):
     sb = supabase()
     target = _get_user_or_404(sb, user_id, "id, role, manager_id")
     is_self = acting["id"] == target["id"]
-    can_manage = _can_manage(acting, target)
+    can_manage = _can_manage(request, acting, target)
     if not (is_self or can_manage):
         raise HTTPException(403, "Sem permissão para alterar este utilizador.")
 
@@ -220,15 +276,24 @@ def update_user(user_id: int, body: UserIn, request: Request):
         patch["crm_username"] = body.crm_username
     if body.crm_password:
         patch["crm_password_enc"] = encrypt_secret(body.crm_password)
-    # Structural fields (role / team / CRM identity) only when managing a non-
-    # diretor_loja target — never restructure a Diretor de Loja (avoids accidental
-    # demotion when a peer/self opens the edit form).
-    if can_manage and target.get("role") != "diretor_loja":
+    # Newsletter-authoring grant: only a loja-manager may toggle it, on any user —
+    # it's a per-user permission, not structure.
+    if body.can_newsletter is not None and _is_loja_manager(request, acting):
+        patch["can_newsletter"] = bool(body.can_newsletter)
+    # Structural fields (role / team / CRM identity) only when managing the target
+    # and never on an Administrador account (protects the super-admin from being
+    # restructured by a loja-level manager).
+    if can_manage and target.get("role") != "administrador":
         if body.role and body.role != target.get("role"):
-            if body.role not in VALID_ROLES or not _can_create(acting, body.role):
+            if body.role not in _valid_roles(sb) or not _can_assign_role(request, acting, body.role):
                 raise HTTPException(403, "Sem permissão para atribuir esse perfil.")
             patch["role"] = body.role
-        if body.manager_id is not None:
+        if body.equipa_id is not None:
+            # 0 / null clears the team; otherwise join it and mirror the leader.
+            equipa_id = body.equipa_id or None
+            patch["equipa_id"] = equipa_id
+            patch["manager_id"] = _equipa_lider(sb, equipa_id) if equipa_id else None
+        elif body.manager_id is not None:
             patch["manager_id"] = body.manager_id
         if body.manager_crm_id is not None:
             patch["manager_crm_id"] = body.manager_crm_id
@@ -244,14 +309,25 @@ def delete_user(user_id: int, request: Request):
     target = _get_user_or_404(sb, user_id, "id, role, manager_id")
     if acting["id"] == target["id"]:
         raise HTTPException(400, "Não pode apagar a própria conta.")
-    if target.get("role") == "diretor_loja":
-        raise HTTPException(403, "Não é possível apagar um Diretor de Loja.")
-    if not _can_manage(acting, target):
+    if target.get("role") == "administrador" and acting["role"] != "administrador":
+        raise HTTPException(403, "Não é possível apagar um Administrador.")
+    if not _can_manage(request, acting, target):
         raise HTTPException(403, "Sem permissão para apagar este utilizador.")
     # Orphan any reports (e.g. deleting a diretor_comercial): null their team link.
     sb.table("platform_users").update({"manager_id": None}).eq("manager_id", user_id).execute()
     sb.table("platform_users").delete().eq("id", user_id).execute()
     return {"ok": True}
+
+
+# ---- assignable profiles (for the role dropdown in the user form) ---------
+@router.get("/roles")
+def list_assignable_roles(request: Request):
+    """All profiles (for display labels) tagged with whether the acting user may
+    assign each one — drives the role dropdown without needing `profiles.manage`."""
+    acting = _acting_user(request)
+    sb = supabase()
+    rows = sb.table("perfis").select("chave, nome").order("id").execute().data or []
+    return {"roles": [{**r, "assignable": _can_assign_role(request, acting, r["chave"])} for r in rows]}
 
 
 # ---- managers dropdown (for mapping a comercial to a CRM gestor) ----------
@@ -290,9 +366,7 @@ class LojaIn(BaseModel):
 
 @router.put("/loja")
 def put_loja(body: LojaIn, request: Request):
-    acting = _acting_user(request)
-    if acting["role"] != "diretor_loja":
-        raise HTTPException(403, "Só o Diretor de Loja pode alterar a loja.")
+    require_cap(request, "loja.edit")
     sb = supabase()
     sb.table("loja_config").update(
         {"numero": body.numero, "nome": body.nome, "updated_at": _now()}
@@ -310,12 +384,11 @@ def _backend_dir() -> Path:
 
 @router.post("/sync")
 def sync_crm(request: Request):
-    """Diretor de Loja only. Spawns a DETACHED re-ingest of processos+leads over all
-    CRM accounts (so a newly-added diretor_comercial's rows get tagged with their
-    username). Runs out-of-process — the single uvicorn worker is never blocked."""
-    acting = _acting_user(request)
-    if acting["role"] != "diretor_loja":
-        raise HTTPException(403, "Só o Diretor de Loja pode sincronizar o CRM.")
+    """Requires the `crm.sync` capability. Spawns a DETACHED re-ingest of
+    processos+leads over all CRM accounts (so a newly-added diretor_comercial's rows
+    get tagged with their username). Runs out-of-process — the single uvicorn worker
+    is never blocked."""
+    require_cap(request, "crm.sync")
     sb = supabase()
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
     running = (

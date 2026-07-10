@@ -19,6 +19,11 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // Password recovery must be reachable when logged out (link opened from email).
+  if (pathname === '/reset') {
+    return NextResponse.next();
+  }
+
   if (!authed) {
     const url = req.nextUrl.clone();
     url.pathname = '/login';

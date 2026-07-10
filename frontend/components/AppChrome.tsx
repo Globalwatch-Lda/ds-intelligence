@@ -13,6 +13,18 @@ import {
 } from '@globalwatch-hub/synertia-ui';
 import ChatDock from './ChatDock';
 import UserFooter from './UserFooter';
+import { useMe } from '../lib/useMe';
+
+// Which capability each nav destination requires (mirrors the backend catalog in
+// backend/app/core/capabilities.py). A route with no entry here is always shown.
+const PAGE_CAP: Record<string, string> = {
+  '/contactos': 'page.contactos',
+  '/dashboard': 'page.dashboard',
+  '/leads': 'page.leads',
+  '/newsletter': 'page.newsletter',
+  '/recap': 'page.recap',
+  '/clientes-live': 'page.crm_live',
+};
 
 // Versão: [plataforma].[pacote UI] build [git]. A plataforma está na v1; o git
 // sha é injetado no build (NEXT_PUBLIC_BUILD_SHA, ver deploy.sh).
@@ -42,6 +54,7 @@ const config: SynertiaConfig = {
 
 export default function AppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { me, caps } = useMe();
   // Nome da loja (configurável na tab Loja) escreve no cabeçalho; cai no default
   // do config enquanto não carrega.
   const [lojaNome, setLojaNome] = useState<string | null>(null);
@@ -51,7 +64,13 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
       .then((d) => { if (d?.nome) setLojaNome(d.nome); })
       .catch(() => {});
   }, []);
-  const cfg: SynertiaConfig = { ...config, clientName: lojaNome ?? config.clientName };
+  // Gate nav + live link by page capabilities. Until /me loads (capabilities
+  // undefined) show everything, to avoid an empty-sidebar flash for full-access users.
+  const hasCaps = !!me?.capabilities;
+  const allow = (href: string) => !hasCaps || !PAGE_CAP[href] || caps.has(PAGE_CAP[href]);
+  const nav = config.nav.filter((item) => allow(item.href));
+  const liveLink = config.liveLink && allow(config.liveLink.href) ? config.liveLink : undefined;
+  const cfg: SynertiaConfig = { ...config, nav, liveLink, clientName: lojaNome ?? config.clientName };
   return (
     <>
       <SynertiaShell

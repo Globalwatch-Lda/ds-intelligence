@@ -1,24 +1,20 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 import { api } from '../../lib/api';
+import { useMe } from '../../lib/useMe';
 
-type Role = 'diretor_loja' | 'diretor_comercial' | 'comercial';
-type UserRow = { id: number; username: string; nome: string | null; role: Role; manager_id: number | null; is_active: boolean };
-type Acting = { id: number | null; role: Role };
+type UserRow = { id: number; username: string; nome: string | null; role: string; manager_id: number | null; is_active: boolean };
+type Acting = { id: number | null; role: string; loja_manager: boolean; can_manage: boolean };
 type UsersResp = { users: UserRow[]; acting: Acting };
 type Manager = { crm_id: number; nome: string | null };
+type RoleOpt = { chave: string; nome: string; assignable: boolean };
 type UserFull = {
   id: number; username: string; nome: string | null; telefone: string | null; email: string | null;
-  role: Role; manager_id: number | null; manager_crm_id: number | null;
-  crm_username: string | null; crm_password_set: boolean;
+  role: string; manager_id: number | null; equipa_id: number | null; manager_crm_id: number | null;
+  crm_username: string | null; crm_password_set: boolean; can_newsletter: boolean;
 };
-
-const ROLE_LABEL: Record<Role, string> = {
-  diretor_loja: 'Diretor de Loja',
-  diretor_comercial: 'Diretor Comercial',
-  comercial: 'Comercial',
-};
+type Equipa = { id: number; nome: string; lider_id: number | null; lider_nome: string | null; membros: { id: number; nome: string | null; username: string; role: string }[] };
 
 function Field({ label, ...props }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
@@ -48,41 +44,44 @@ function Select({ label, children, ...props }: { label: string; children: React.
 
 // ---- User create/edit form ----------------------------------------------
 function UserForm({
-  mode, userId, acting, users, managers, onSaved, onCancel,
+  mode, userId, acting, managers, roles, onSaved, onCancel,
 }: {
   mode: 'create' | 'edit';
   userId: number | null;
   acting: Acting;
-  users: UserRow[];
   managers: Manager[];
+  roles: RoleOpt[];
   onSaved: () => void;
   onCancel: () => void;
 }) {
   const { data: full } = useSWR<UserFull>(mode === 'edit' && userId ? `/api/settings/users/${userId}` : null, api);
-  const lojaDir = acting.role === 'diretor_loja';
+  const lojaDir = acting.loja_manager;
+  const roleLabel = useMemo(() => Object.fromEntries(roles.map((r) => [r.chave, r.nome])), [roles]);
+  const assignable = roles.filter((r) => r.assignable);
   const [f, setF] = useState({
     username: '', password: '', nome: '', telefone: '', email: '',
-    role: (lojaDir ? 'comercial' : 'comercial') as Role,
-    manager_id: '' as string, manager_crm_id: '' as string,
-    crm_username: '', crm_password: '',
+    role: 'consultor',
+    equipa_id: '' as string, manager_crm_id: '' as string,
+    crm_username: '', crm_password: '', can_newsletter: false,
   });
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Teams for the assignment dropdown (only loja managers assign teams here).
+  const { data: teamsResp } = useSWR<{ equipas: Equipa[] }>(lojaDir ? '/api/equipas' : null, api);
+  const equipas = teamsResp?.equipas ?? [];
 
   useEffect(() => {
     if (mode === 'edit' && full) {
       setF({
         username: full.username ?? '', password: '', nome: full.nome ?? '', telefone: full.telefone ?? '', email: full.email ?? '',
-        role: full.role, manager_id: full.manager_id?.toString() ?? '', manager_crm_id: full.manager_crm_id?.toString() ?? '',
-        crm_username: full.crm_username ?? '', crm_password: '',
+        role: full.role, equipa_id: full.equipa_id?.toString() ?? '', manager_crm_id: full.manager_crm_id?.toString() ?? '',
+        crm_username: full.crm_username ?? '', crm_password: '', can_newsletter: !!full.can_newsletter,
       });
     }
   }, [mode, full]);
-
-  const diretores = users.filter((u) => u.role === 'diretor_comercial');
-  const roleOptions: Role[] = lojaDir ? ['diretor_comercial', 'comercial'] : ['comercial'];
-  const lockedRole = mode === 'edit' && full?.role === 'diretor_loja'; // não se reestrutura um Diretor de Loja
-  const isComercial = f.role === 'comercial';
+  // A system administrator account can't be restructured by a loja manager.
+  const lockedRole = mode === 'edit' && full?.role === 'administrador' && acting.role !== 'administrador';
+  const isConsultor = f.role === 'consultor';
   const isDiretorComercial = f.role === 'diretor_comercial';
 
   async function save() {
@@ -90,10 +89,13 @@ function UserForm({
     const body: any = {
       username: f.username, nome: f.nome, telefone: f.telefone, email: f.email,
       role: f.role,
-      manager_id: f.manager_id ? Number(f.manager_id) : null,
-      manager_crm_id: isComercial && f.manager_crm_id ? Number(f.manager_crm_id) : null,
+      manager_crm_id: isConsultor && f.manager_crm_id ? Number(f.manager_crm_id) : null,
       crm_username: f.crm_username || null,
     };
+    if (lojaDir) {
+      body.can_newsletter = f.can_newsletter;
+      body.equipa_id = f.equipa_id ? Number(f.equipa_id) : null;
+    }
     if (f.password) body.password = f.password;
     if (f.crm_password) body.crm_password = f.crm_password;
     try {
@@ -121,24 +123,28 @@ function UserForm({
       <Field label="Telemóvel" value={f.telefone} onChange={(e) => setF({ ...f, telefone: e.target.value })} />
       <Field label="Email" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
 
-      {lojaDir && !lockedRole ? (
-        <Select label="Perfil" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value as Role })}>
-          {roleOptions.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+      {assignable.length > 0 && !lockedRole ? (
+        <Select label="Perfil" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>
+          {/* keep the current role selectable even if not in the assignable set */}
+          {!assignable.some((r) => r.chave === f.role) && (
+            <option value={f.role}>{roleLabel[f.role] ?? f.role}</option>
+          )}
+          {assignable.map((r) => <option key={r.chave} value={r.chave}>{r.nome}</option>)}
         </Select>
       ) : (
-        <p className="text-xs text-ink-500">Perfil: <span className="font-medium">{ROLE_LABEL[f.role]}</span></p>
+        <p className="text-xs text-ink-500">Perfil: <span className="font-medium">{roleLabel[f.role] ?? f.role}</span></p>
       )}
 
-      {isComercial && (
+      {isConsultor && (
         <>
           <Select label="Gestor no CRM (define os processos que vê)" value={f.manager_crm_id} onChange={(e) => setF({ ...f, manager_crm_id: e.target.value })}>
             <option value="">— selecionar —</option>
             {managers.map((m) => <option key={m.crm_id} value={m.crm_id}>{m.nome ?? m.crm_id}</option>)}
           </Select>
           {lojaDir && (
-            <Select label="Diretor Comercial (equipa)" value={f.manager_id} onChange={(e) => setF({ ...f, manager_id: e.target.value })}>
+            <Select label="Equipa" value={f.equipa_id} onChange={(e) => setF({ ...f, equipa_id: e.target.value })}>
               <option value="">— sem equipa —</option>
-              {diretores.map((d) => <option key={d.id} value={d.id}>{d.nome ?? d.username}</option>)}
+              {equipas.map((eq) => <option key={eq.id} value={eq.id}>{eq.nome}{eq.lider_nome ? ` (${eq.lider_nome})` : ''}</option>)}
             </Select>
           )}
         </>
@@ -147,12 +153,29 @@ function UserForm({
       <div className="space-y-3 rounded-lg border border-ink-200 bg-ink-50/50 p-3">
         <p className="text-xs font-medium text-ink-600">
           Credenciais CRM (CrediDesk)
-          {isComercial && <span className="font-normal text-ink-400"> — opcional; o âmbito do Comercial vem do gestor acima</span>}
+          {isConsultor && <span className="font-normal text-ink-400"> — opcional; o âmbito do Consultor vem do gestor acima</span>}
           {isDiretorComercial && <span className="font-normal text-ink-400"> — necessárias para ingerir os dados da equipa deste diretor</span>}
         </p>
         <Field label="Utilizador CRM (email)" value={f.crm_username} onChange={(e) => setF({ ...f, crm_username: e.target.value })} autoComplete="off" />
         <Field label={full?.crm_password_set ? 'Palavra-passe CRM (definida — vazio = manter)' : 'Palavra-passe CRM'} type="password" autoComplete="new-password" value={f.crm_password} onChange={(e) => setF({ ...f, crm_password: e.target.value })} />
       </div>
+
+      {lojaDir && (
+        <label className="flex items-start gap-3 rounded-lg border border-ink-200 bg-white p-3">
+          <input
+            type="checkbox"
+            checked={f.can_newsletter}
+            onChange={(e) => setF({ ...f, can_newsletter: e.target.checked })}
+            className="mt-0.5 h-4 w-4 accent-[color:var(--accent)]"
+          />
+          <span className="text-sm">
+            <span className="font-medium text-ink-900">Pode gerar newsletters</span>
+            <span className="mt-0.5 block text-xs text-ink-400">
+              Se desligado, este utilizador só consulta a última newsletter e o histórico de envios.
+            </span>
+          </span>
+        </label>
+      )}
 
       <div className="flex items-center gap-3">
         <button onClick={save} disabled={busy} className="btn-primary">{busy ? 'A guardar …' : 'Guardar'}</button>
@@ -163,7 +186,7 @@ function UserForm({
   );
 }
 
-// ---- Sincronizar CRM (Diretor de Loja) -----------------------------------
+// ---- Sincronizar CRM ------------------------------------------------------
 type SyncRun = { finished_at: string | null; rows_upserted: number | null; error: string | null } | null;
 function SyncBar() {
   const { data, mutate } = useSWR<{ processos: SyncRun; leads: SyncRun; running: boolean }>(
@@ -203,18 +226,21 @@ function SyncBar() {
 }
 
 // ---- Utilizadores tab ----------------------------------------------------
-function UtilizadoresTab() {
+function UtilizadoresTab({ canSync }: { canSync: boolean }) {
   const { data, mutate } = useSWR<UsersResp>('/api/settings/users', api);
   const { data: mgrs } = useSWR<{ managers: Manager[] }>('/api/settings/managers', api);
+  const { data: rolesResp } = useSWR<{ roles: RoleOpt[] }>('/api/settings/roles', api);
   const [sel, setSel] = useState<number | 'new' | null>(null);
   const users = data?.users ?? [];
   const acting = data?.acting;
   const managers = mgrs?.managers ?? [];
+  const roles = rolesResp?.roles ?? [];
+  const roleLabel = useMemo(() => Object.fromEntries(roles.map((r) => [r.chave, r.nome])), [roles]);
 
-  const canCreate = acting && (acting.role === 'diretor_loja' || acting.role === 'diretor_comercial');
+  const canCreate = !!acting?.can_manage;
   const selUser = typeof sel === 'number' ? users.find((u) => u.id === sel) : undefined;
   const canDelete = !!(acting && selUser && selUser.id !== acting.id &&
-    (acting.role === 'diretor_loja' ? selUser.role !== 'diretor_loja' : selUser.manager_id === acting.id));
+    (acting.loja_manager ? selUser.role !== 'administrador' : selUser.manager_id === acting.id));
 
   async function del() {
     if (!selUser) return;
@@ -227,7 +253,7 @@ function UtilizadoresTab() {
 
   return (
     <div>
-      {acting?.role === 'diretor_loja' && <SyncBar />}
+      {canSync && <SyncBar />}
       <div className="grid gap-6 md:grid-cols-[240px_1fr]">
       <nav className="space-y-1">
         <div className="flex items-center justify-between px-1 pb-1">
@@ -247,7 +273,7 @@ function UtilizadoresTab() {
             </span>
             <span className="min-w-0">
               <span className="block truncate">{u.nome ?? u.username}</span>
-              <span className="block truncate text-[11px] text-ink-400">{ROLE_LABEL[u.role]}</span>
+              <span className="block truncate text-[11px] text-ink-400">{roleLabel[u.role] ?? u.role}</span>
             </span>
           </button>
         ))}
@@ -257,12 +283,12 @@ function UtilizadoresTab() {
       <section className="card">
         {sel === null && <p className="text-sm text-ink-400">Selecione um utilizador ou adicione um novo.</p>}
         {sel === 'new' && acting && (
-          <UserForm mode="create" userId={null} acting={acting} users={users} managers={managers}
+          <UserForm mode="create" userId={null} acting={acting} managers={managers} roles={roles}
             onSaved={() => { setSel(null); mutate(); }} onCancel={() => setSel(null)} />
         )}
         {typeof sel === 'number' && acting && (
           <div className="space-y-4">
-            <UserForm mode="edit" userId={sel} acting={acting} users={users} managers={managers}
+            <UserForm mode="edit" userId={sel} acting={acting} managers={managers} roles={roles}
               onSaved={() => mutate()} onCancel={() => setSel(null)} />
             {canDelete && (
               <div className="border-t border-ink-100 pt-4">
@@ -277,13 +303,370 @@ function UtilizadoresTab() {
   );
 }
 
+// ---- Perfis tab ----------------------------------------------------------
+type Perfil = { id: number; chave: string; nome: string; is_system: boolean; data_scope: string; permissoes: string[] };
+type CapItem = { key: string; grupo: string; rotulo: string };
+type ScopeItem = { key: string; rotulo: string };
+
+function PerfisTab() {
+  const { data: list, mutate } = useSWR<{ perfis: Perfil[] }>('/api/perfis', api);
+  const { data: cat } = useSWR<{ capabilities: CapItem[]; data_scopes: ScopeItem[] }>('/api/perfis/catalog', api);
+  const [sel, setSel] = useState<number | 'new' | null>(null);
+  const perfis = list?.perfis ?? [];
+  const caps = cat?.capabilities ?? [];
+  const scopes = cat?.data_scopes ?? [];
+  const grupos = useMemo(() => {
+    const g: Record<string, CapItem[]> = {};
+    caps.forEach((c) => { (g[c.grupo] ??= []).push(c); });
+    return g;
+  }, [caps]);
+
+  const selPerfil = typeof sel === 'number' ? perfis.find((p) => p.id === sel) : undefined;
+
+  const [f, setF] = useState<{ nome: string; data_scope: string; permissoes: Set<string> }>({ nome: '', data_scope: 'propria', permissoes: new Set() });
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (sel === 'new') setF({ nome: '', data_scope: 'propria', permissoes: new Set() });
+    else if (selPerfil) setF({ nome: selPerfil.nome, data_scope: selPerfil.data_scope, permissoes: new Set(selPerfil.permissoes) });
+  }, [sel, selPerfil]);
+
+  function toggle(key: string) {
+    setF((prev) => {
+      const next = new Set(prev.permissoes);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return { ...prev, permissoes: next };
+    });
+  }
+
+  async function save() {
+    setBusy(true); setMsg(null);
+    const body = { nome: f.nome, data_scope: f.data_scope, permissoes: [...f.permissoes] };
+    try {
+      if (sel === 'new') {
+        const r = await api<{ id: number }>('/api/perfis', { method: 'POST', body: JSON.stringify(body) });
+        setMsg('✓ Perfil criado.'); await mutate(); setSel(r.id);
+      } else if (selPerfil) {
+        await api(`/api/perfis/${selPerfil.id}`, { method: 'PUT', body: JSON.stringify(body) });
+        setMsg('✓ Guardado.'); mutate();
+      }
+    } catch (e: any) { setMsg(`Erro: ${e.message}`); } finally { setBusy(false); }
+  }
+
+  async function del() {
+    if (!selPerfil) return;
+    if (!confirm(`Apagar o perfil "${selPerfil.nome}"?`)) return;
+    try {
+      await api(`/api/perfis/${selPerfil.id}`, { method: 'DELETE' });
+      setSel(null); mutate();
+    } catch (e: any) { alert(e.message); }
+  }
+
+  const editing = sel === 'new' || !!selPerfil;
+
+  return (
+    <div className="grid gap-6 md:grid-cols-[240px_1fr]">
+      <nav className="space-y-1">
+        <div className="flex items-center justify-between px-1 pb-1">
+          <span className="text-xs font-semibold uppercase tracking-wider text-ink-400">Perfis</span>
+          <button onClick={() => setSel('new')} className="rounded-md bg-[color:var(--accent)] px-2 py-0.5 text-xs font-medium text-white">+ Novo</button>
+        </div>
+        {perfis.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => setSel(p.id)}
+            className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm ${sel === p.id ? 'bg-ink-100 font-medium text-ink-900' : 'text-ink-600 hover:bg-ink-50'}`}
+          >
+            <span className="truncate">{p.nome}</span>
+            {p.is_system && <span className="shrink-0 rounded bg-ink-100 px-1.5 py-0.5 text-[10px] text-ink-400">sistema</span>}
+          </button>
+        ))}
+      </nav>
+
+      <section className="card">
+        {!editing && <p className="text-sm text-ink-400">Selecione um perfil ou crie um novo.</p>}
+        {editing && (
+          <div className="max-w-lg space-y-4">
+            <h3 className="text-sm font-semibold text-ink-900">{sel === 'new' ? 'Novo perfil' : `Editar — ${selPerfil?.nome}`}</h3>
+            <Field label="Nome do perfil" value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} />
+            <Select label="Âmbito de dados CRM" value={f.data_scope} onChange={(e) => setF({ ...f, data_scope: e.target.value })}>
+              {scopes.map((s) => <option key={s.key} value={s.key}>{s.rotulo}</option>)}
+            </Select>
+
+            <div className="space-y-4">
+              {Object.entries(grupos).map(([grupo, items]) => (
+                <div key={grupo}>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-400">{grupo}</p>
+                  <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                    {items.map((c) => (
+                      <label key={c.key} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-ink-50">
+                        <input
+                          type="checkbox"
+                          checked={f.permissoes.has(c.key)}
+                          onChange={() => toggle(c.key)}
+                          className="h-4 w-4 accent-[color:var(--accent)]"
+                        />
+                        <span className="text-ink-800">{c.rotulo}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button onClick={save} disabled={busy} className="btn-primary">{busy ? 'A guardar …' : 'Guardar'}</button>
+              {selPerfil && !selPerfil.is_system && (
+                <button onClick={del} className="rounded-lg border border-ds-200 px-3 py-1.5 text-sm text-ds-700 hover:bg-ds-50">Apagar</button>
+              )}
+              {msg && <span className="text-sm text-ink-500">{msg}</span>}
+            </div>
+            {selPerfil?.is_system && (
+              <p className="text-xs text-ink-400">Perfil de sistema — pode editar permissões e âmbito, mas não apagar.</p>
+            )}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+// ---- Equipas tab ---------------------------------------------------------
+type EquipasResp = {
+  equipas: Equipa[];
+  loja_admin: boolean;
+  acting: { id: number | null };
+  liders: { id: number; nome: string | null; username: string }[];
+  consultores: { id: number; nome: string | null; username: string; equipa_id: number | null }[];
+};
+
+function EquipasTab() {
+  const { data, mutate } = useSWR<EquipasResp>('/api/equipas', api);
+  const [sel, setSel] = useState<number | 'new' | null>(null);
+  const equipas = data?.equipas ?? [];
+  const lojaAdmin = !!data?.loja_admin;
+  const liders = data?.liders ?? [];
+  const consultores = data?.consultores ?? [];
+  const selTeam = typeof sel === 'number' ? equipas.find((e) => e.id === sel) : undefined;
+
+  const [f, setF] = useState({ nome: '', lider_id: '' as string });
+  const [addUser, setAddUser] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (sel === 'new') setF({ nome: '', lider_id: '' });
+    else if (selTeam) setF({ nome: selTeam.nome, lider_id: selTeam.lider_id?.toString() ?? '' });
+  }, [sel, selTeam]);
+
+  async function save() {
+    setBusy(true); setMsg(null);
+    const body: any = { nome: f.nome };
+    if (lojaAdmin) body.lider_id = f.lider_id ? Number(f.lider_id) : null;
+    try {
+      if (sel === 'new') {
+        const r = await api<{ id: number }>('/api/equipas', { method: 'POST', body: JSON.stringify(body) });
+        setMsg('✓ Equipa criada.'); await mutate(); setSel(r.id);
+      } else if (selTeam) {
+        await api(`/api/equipas/${selTeam.id}`, { method: 'PUT', body: JSON.stringify(body) });
+        setMsg('✓ Guardado.'); mutate();
+      }
+    } catch (e: any) { setMsg(`Erro: ${e.message}`); } finally { setBusy(false); }
+  }
+
+  async function del() {
+    if (!selTeam) return;
+    if (!confirm(`Apagar a equipa "${selTeam.nome}"? Os membros ficam sem equipa.`)) return;
+    try { await api(`/api/equipas/${selTeam.id}`, { method: 'DELETE' }); setSel(null); mutate(); }
+    catch (e: any) { alert(e.message); }
+  }
+
+  async function addMembro() {
+    if (!selTeam || !addUser) return;
+    try {
+      await api(`/api/equipas/${selTeam.id}/membros`, { method: 'POST', body: JSON.stringify({ user_id: Number(addUser) }) });
+      setAddUser(''); mutate();
+    } catch (e: any) { alert(e.message); }
+  }
+
+  async function removeMembro(uid: number) {
+    if (!selTeam) return;
+    try { await api(`/api/equipas/${selTeam.id}/membros/${uid}`, { method: 'DELETE' }); mutate(); }
+    catch (e: any) { alert(e.message); }
+  }
+
+  const editing = sel === 'new' || !!selTeam;
+  const podeAdicionar = consultores.filter((c) => c.equipa_id !== selTeam?.id);
+
+  return (
+    <div className="grid gap-6 md:grid-cols-[240px_1fr]">
+      <nav className="space-y-1">
+        <div className="flex items-center justify-between px-1 pb-1">
+          <span className="text-xs font-semibold uppercase tracking-wider text-ink-400">Equipas</span>
+          {lojaAdmin && (
+            <button onClick={() => setSel('new')} className="rounded-md bg-[color:var(--accent)] px-2 py-0.5 text-xs font-medium text-white">+ Nova</button>
+          )}
+        </div>
+        {equipas.map((e) => (
+          <button
+            key={e.id}
+            onClick={() => setSel(e.id)}
+            className={`flex w-full flex-col rounded-lg px-3 py-2 text-left text-sm ${sel === e.id ? 'bg-ink-100 font-medium text-ink-900' : 'text-ink-600 hover:bg-ink-50'}`}
+          >
+            <span className="truncate">{e.nome}</span>
+            <span className="truncate text-[11px] text-ink-400">
+              {e.lider_nome ? `Líder: ${e.lider_nome}` : 'Sem líder'} · {e.membros.length} membro(s)
+            </span>
+          </button>
+        ))}
+        {!equipas.length && <p className="px-3 text-sm text-ink-400">Sem equipas.</p>}
+      </nav>
+
+      <section className="card">
+        {!editing && <p className="text-sm text-ink-400">Selecione uma equipa ou crie uma nova.</p>}
+        {editing && (
+          <div className="max-w-lg space-y-4">
+            <h3 className="text-sm font-semibold text-ink-900">{sel === 'new' ? 'Nova equipa' : `Editar — ${selTeam?.nome}`}</h3>
+            <Field label="Nome da equipa" value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} />
+            {lojaAdmin ? (
+              <Select label="Líder (Diretor Comercial)" value={f.lider_id} onChange={(e) => setF({ ...f, lider_id: e.target.value })}>
+                <option value="">— sem líder —</option>
+                {liders.map((l) => <option key={l.id} value={l.id}>{l.nome ?? l.username}</option>)}
+              </Select>
+            ) : (
+              <p className="text-xs text-ink-500">Líder: <span className="font-medium">{selTeam?.lider_nome ?? '—'}</span></p>
+            )}
+
+            <div className="flex items-center gap-3">
+              <button onClick={save} disabled={busy} className="btn-primary">{busy ? 'A guardar …' : 'Guardar'}</button>
+              {lojaAdmin && selTeam && (
+                <button onClick={del} className="rounded-lg border border-ds-200 px-3 py-1.5 text-sm text-ds-700 hover:bg-ds-50">Apagar</button>
+              )}
+              {msg && <span className="text-sm text-ink-500">{msg}</span>}
+            </div>
+
+            {selTeam && (
+              <div className="border-t border-ink-100 pt-4">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-400">Membros</p>
+                {selTeam.membros.length === 0 ? (
+                  <p className="text-sm text-ink-400">Sem membros.</p>
+                ) : (
+                  <ul className="divide-y divide-ink-100 text-sm">
+                    {selTeam.membros.map((m) => (
+                      <li key={m.id} className="flex items-center justify-between py-2">
+                        <span>{m.nome ?? m.username}</span>
+                        <button onClick={() => removeMembro(m.id)} className="text-xs text-ds-700 hover:underline">remover</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="mt-3 flex items-end gap-2">
+                  <div className="flex-1">
+                    <Select label="Adicionar consultor" value={addUser} onChange={(e) => setAddUser(e.target.value)}>
+                      <option value="">— selecionar —</option>
+                      {podeAdicionar.map((c) => <option key={c.id} value={c.id}>{c.nome ?? c.username}{c.equipa_id ? ' (noutra equipa)' : ''}</option>)}
+                    </Select>
+                  </div>
+                  <button onClick={addMembro} disabled={!addUser} className="btn-ghost mb-0.5">Adicionar</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+// ---- Comunicação tab -----------------------------------------------------
+type CanalCfg = { canal: string; ativo: boolean; batch_size: number; intervalo_segundos: number; cap_diario: number; remetente: string | null };
+type QueueResp = { pendentes: number; enviados: number; falhados: number; recent: { id: number; canal: string; destinatario: string; status: string; ref_tipo: string | null }[] };
+
+const CANAL_LABEL: Record<string, string> = { email: 'Email', sms: 'SMS', whatsapp_evolution: 'WhatsApp (Evolution)' };
+
+function CanalCard({ cfg, onSaved }: { cfg: CanalCfg; onSaved: () => void }) {
+  const [f, setF] = useState<CanalCfg>(cfg);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => setF(cfg), [cfg]);
+
+  async function save() {
+    setBusy(true); setMsg(null);
+    try {
+      await api(`/api/messaging/config/${f.canal}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          ativo: f.ativo, batch_size: Number(f.batch_size), intervalo_segundos: Number(f.intervalo_segundos),
+          cap_diario: Number(f.cap_diario), remetente: f.remetente,
+        }),
+      });
+      setMsg('✓ Guardado.'); onSaved();
+    } catch (e: any) { setMsg(`Erro: ${e.message}`); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="card space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-ink-900">{CANAL_LABEL[f.canal] ?? f.canal}</h3>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={f.ativo} onChange={(e) => setF({ ...f, ativo: e.target.checked })} className="h-4 w-4 accent-[color:var(--accent)]" />
+          {f.ativo ? 'Ativo' : 'Inativo'}
+        </label>
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Field label="Lote (nº/envio)" type="number" value={f.batch_size} onChange={(e) => setF({ ...f, batch_size: Number(e.target.value) })} />
+        <Field label="Intervalo (s)" type="number" value={f.intervalo_segundos} onChange={(e) => setF({ ...f, intervalo_segundos: Number(e.target.value) })} />
+        <Field label="Limite diário" type="number" value={f.cap_diario} onChange={(e) => setF({ ...f, cap_diario: Number(e.target.value) })} />
+        <Field label="Remetente" value={f.remetente ?? ''} onChange={(e) => setF({ ...f, remetente: e.target.value })} />
+      </div>
+      <div className="flex items-center gap-3">
+        <button onClick={save} disabled={busy} className="btn-primary">{busy ? 'A guardar …' : 'Guardar'}</button>
+        {msg && <span className="text-sm text-ink-500">{msg}</span>}
+      </div>
+    </div>
+  );
+}
+
+function ComunicacaoTab() {
+  const { data, mutate } = useSWR<{ config: CanalCfg[] }>('/api/messaging/config', api);
+  const { data: q, mutate: mutateQ } = useSWR<QueueResp>('/api/messaging/queue', api, { refreshInterval: 8000 });
+  const [busy, setBusy] = useState(false);
+  const canais = data?.config ?? [];
+
+  async function dispatch() {
+    setBusy(true);
+    try { await api('/api/messaging/dispatch', { method: 'POST' }); await mutateQ(); }
+    catch (e: any) { alert(e.message); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="space-y-6">
+      <p className="text-sm text-ink-400">
+        Canais de comunicação da plataforma (Email, SMS e WhatsApp). Os limites de lote e o intervalo
+        entre lotes espaçam os envios para não disparar alarmes anti-spam. Um canal inativo (ou sem
+        serviço configurado no servidor) enfileira mas não entrega.
+      </p>
+
+      <div className="flex flex-wrap items-center gap-4 rounded-lg border border-ink-200 bg-ink-50/50 px-4 py-3 text-sm">
+        <span><b className="text-ink-900">{q?.pendentes ?? '—'}</b> <span className="text-ink-500">pendentes</span></span>
+        <span><b className="text-ink-900">{q?.enviados ?? '—'}</b> <span className="text-ink-500">enviados</span></span>
+        <span><b className="text-ink-900">{q?.falhados ?? '—'}</b> <span className="text-ink-500">falhados</span></span>
+        <button onClick={dispatch} disabled={busy} className="btn-ghost ml-auto">{busy ? 'A processar …' : 'Processar fila agora'}</button>
+      </div>
+
+      {canais.map((c) => <CanalCard key={c.canal} cfg={c} onSaved={() => mutate()} />)}
+      {!canais.length && <p className="text-sm text-ink-400">A carregar …</p>}
+    </div>
+  );
+}
+
 // ---- Loja tab ------------------------------------------------------------
-function LojaTab({ actingRole }: { actingRole: Role | undefined }) {
+function LojaTab({ canEdit }: { canEdit: boolean }) {
   const { data, mutate } = useSWR<{ numero: string | null; nome: string | null }>('/api/settings/loja', api);
   const [f, setF] = useState({ numero: '', nome: '' });
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const canEdit = actingRole === 'diretor_loja';
 
   useEffect(() => { if (data) setF({ numero: data.numero ?? '', nome: data.nome ?? '' }); }, [data]);
 
@@ -306,7 +689,7 @@ function LojaTab({ actingRole }: { actingRole: Role | undefined }) {
           {msg && <span className="text-sm text-ink-500">{msg}</span>}
         </div>
       ) : (
-        <p className="text-xs text-ink-400">Só o Diretor de Loja pode alterar a loja.</p>
+        <p className="text-xs text-ink-400">Sem permissão para alterar os dados da loja.</p>
       )}
     </section>
   );
@@ -314,8 +697,16 @@ function LojaTab({ actingRole }: { actingRole: Role | undefined }) {
 
 // ---- Page ----------------------------------------------------------------
 export default function ConfiguracoesPage() {
-  const { data: me } = useSWR<{ role: Role }>('/api/auth/me', api);
-  const [tab, setTab] = useState<'utilizadores' | 'loja'>('utilizadores');
+  const { can } = useMe();
+  type Tab = 'utilizadores' | 'perfis' | 'equipas' | 'comunicacao' | 'loja';
+  const tabs: { key: Tab; label: string }[] = [
+    { key: 'utilizadores', label: 'Utilizadores' },
+    ...(can('teams.manage') ? [{ key: 'equipas' as Tab, label: 'Equipas' }] : []),
+    ...(can('profiles.manage') ? [{ key: 'perfis' as Tab, label: 'Perfis' }] : []),
+    ...(can('messaging.config') ? [{ key: 'comunicacao' as Tab, label: 'Comunicação' }] : []),
+    { key: 'loja', label: 'Loja' },
+  ];
+  const [tab, setTab] = useState<Tab>('utilizadores');
 
   return (
     <div className="space-y-6">
@@ -325,18 +716,22 @@ export default function ConfiguracoesPage() {
       </header>
 
       <div className="flex gap-2 border-b border-ink-100">
-        {(['utilizadores', 'loja'] as const).map((t) => (
+        {tabs.map((t) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm ${tab === t ? 'border-[color:var(--accent)] font-medium text-ink-900' : 'border-transparent text-ink-500 hover:text-ink-700'}`}
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`-mb-px border-b-2 px-3 py-2 text-sm ${tab === t.key ? 'border-[color:var(--accent)] font-medium text-ink-900' : 'border-transparent text-ink-500 hover:text-ink-700'}`}
           >
-            {t === 'utilizadores' ? 'Utilizadores' : 'Loja'}
+            {t.label}
           </button>
         ))}
       </div>
 
-      {tab === 'utilizadores' ? <UtilizadoresTab /> : <LojaTab actingRole={me?.role} />}
+      {tab === 'utilizadores' && <UtilizadoresTab canSync={can('crm.sync')} />}
+      {tab === 'equipas' && can('teams.manage') && <EquipasTab />}
+      {tab === 'perfis' && can('profiles.manage') && <PerfisTab />}
+      {tab === 'comunicacao' && can('messaging.config') && <ComunicacaoTab />}
+      {tab === 'loja' && <LojaTab canEdit={can('loja.edit')} />}
     </div>
   );
 }

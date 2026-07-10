@@ -15,13 +15,16 @@ import base64
 import hashlib
 import hmac
 import json
+import secrets
 import time
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from ..config import settings
-from ..core.crypto import verify_password
+from ..core.crypto import hash_password, verify_password
+from ..core.mailer import branded_email, send_email
 
 router = APIRouter()
 
@@ -48,7 +51,7 @@ def _db_user(username: str) -> dict | None:
         res = (
             supabase()
             .table("platform_users")
-            .select("id, username, nome, role, password_hash, password_salt, is_active")
+            .select("id, username, nome, role, can_newsletter, password_hash, password_salt, is_active")
             .eq("username", username)
             .eq("is_active", True)
             .limit(1)
@@ -163,10 +166,149 @@ def me(request: Request):
     # role drives what the frontend shows (user management UI, loja tab). Env-only
     # admin logins (ds/amin) have no DB row → treated as diretor_loja (loja-wide).
     role = (row.get("role") if row else None) or "diretor_loja"
+    # Newsletter authoring is a per-user grant. Env-only admin logins (ds/amin,
+    # no DB row) keep access so nobody is locked out during a demo.
+    can_newsletter = bool(row.get("can_newsletter")) if row else True
+    # RBAC: capabilities + CRM data scope come from the user's profile (ds.perfis).
+    # Lazy import — core.scope imports from this module.
+    from ..core.scope import user_capabilities, acting_data_scope
+
     return {
         "authenticated": True,
         "username": user,
         "nome": nome,
         "role": role,
         "user_id": (row.get("id") if row else None),
+        "can_newsletter": can_newsletter,
+        "capabilities": sorted(user_capabilities(request)),
+        "data_scope": acting_data_scope(request),
     }
+
+
+# ---- Password recovery ---------------------------------------------------
+RESET_TTL = timedelta(hours=1)
+
+
+def _hash_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _find_user_by_login(sb, login: str) -> dict | None:
+    """Match by username first, then email. Separate queries (not PostgREST or_)
+    to avoid filter-injection from raw user input."""
+    for col in ("username", "email"):
+        r = (
+            sb.table("platform_users")
+            .select("id, username, nome, email")
+            .eq(col, login)
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+            .data
+        )
+        if r:
+            return r[0]
+    return None
+
+
+class ForgotIn(BaseModel):
+    login: str  # username or email
+
+
+@router.post("/forgot")
+def forgot(body: ForgotIn):
+    """Start a password reset. Always returns 200 (no account enumeration). If email
+    is unconfigured, non-production surfaces a dev link so the flow is testable."""
+    from ..db import supabase
+
+    login = (body.login or "").strip()
+    resp: dict = {"ok": True}
+    if not login:
+        return resp
+    try:
+        sb = supabase()
+        user = _find_user_by_login(sb, login)
+        if user:
+            raw = secrets.token_urlsafe(32)
+            expires = datetime.now(timezone.utc) + RESET_TTL
+            sb.table("password_resets").insert(
+                {"user_id": user["id"], "token_hash": _hash_token(raw), "expires_at": expires.isoformat()}
+            ).execute()
+            link = f"{settings.APP_BASE_URL}/reset?token={raw}"
+            html = branded_email(
+                "Recuperação de palavra-passe",
+                (
+                    f"Olá {user.get('nome') or user['username']},<br><br>"
+                    "Recebemos um pedido para repor a palavra-passe da sua conta. "
+                    "Clique no botão abaixo para definir uma nova — o link é válido por 1 hora.<br><br>"
+                    "Se não foi você, ignore este email."
+                ),
+                cta_label="Repor palavra-passe",
+                cta_url=link,
+            )
+            result = send_email(
+                user.get("email"),
+                "Recuperação de palavra-passe — DS Crédito",
+                html,
+                text_body=f"Reponha a sua palavra-passe: {link}",
+            )
+            if not result.get("delivered") and settings.ENVIRONMENT != "production":
+                resp["dev_link"] = link
+    except Exception:
+        pass  # never leak internal errors on this endpoint
+    return resp
+
+
+def _valid_reset(sb, raw: str) -> dict | None:
+    row = (
+        sb.table("password_resets")
+        .select("id, user_id, expires_at, used_at")
+        .eq("token_hash", _hash_token(raw))
+        .limit(1)
+        .execute()
+        .data
+        or [None]
+    )[0]
+    if not row or row.get("used_at"):
+        return None
+    try:
+        exp = datetime.fromisoformat(str(row["expires_at"]).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if exp < datetime.now(timezone.utc):
+        return None
+    return row
+
+
+@router.get("/reset/validate")
+def reset_validate(token: str):
+    from ..db import supabase
+
+    try:
+        return {"valid": bool(_valid_reset(supabase(), token))}
+    except Exception:
+        return {"valid": False}
+
+
+class ResetIn(BaseModel):
+    token: str
+    password: str
+
+
+@router.post("/reset")
+def reset(body: ResetIn):
+    from ..db import supabase
+
+    if len(body.password or "") < 8:
+        raise HTTPException(400, "A palavra-passe deve ter pelo menos 8 caracteres.")
+    sb = supabase()
+    row = _valid_reset(sb, body.token)
+    if not row:
+        raise HTTPException(400, "Link inválido ou expirado. Peça um novo.")
+    h, salt = hash_password(body.password)
+    now = datetime.now(timezone.utc).isoformat()
+    sb.table("platform_users").update(
+        {"password_hash": h, "password_salt": salt, "updated_at": now}
+    ).eq("id", row["user_id"]).execute()
+    sb.table("password_resets").update({"used_at": now}).eq("id", row["id"]).execute()
+    return {"ok": True}

@@ -39,6 +39,31 @@ class Settings:
     LOJA_NAME: str = os.environ.get("LOJA_NAME", "DS Crédito Ramada – Jardim da Amoreira")
     BRAND_RED: str = os.environ.get("BRAND_RED", "#E30613")
 
+    # Public base URL of the frontend (used to build links inside emails, e.g. the
+    # password-reset link). Override per environment (staging vs prod).
+    APP_BASE_URL: str = os.environ.get("APP_BASE_URL", "https://dscredito.synertia-gw.ai")
+
+    # ---- Email (AWS SES) ----
+    # Reused by password recovery AND any platform communication (Workstream D).
+    # Empty SES_FROM → email is UNCONFIGURED: the mailer logs instead of sending, and
+    # non-production endpoints surface a dev link so the flow is testable on staging.
+    # On EC2 prefer an IAM role over static keys; region defaults to the box's region.
+    SES_REGION: str = os.environ.get("SES_REGION", os.environ.get("AWS_REGION", "eu-west-1"))
+    SES_FROM: str = os.environ.get("SES_FROM", "")  # e.g. "DS Crédito <noreply@dscredito.pt>"
+
+    # ---- SMS (AWS: SNS / End User Messaging) ----
+    # Uses the EC2 IAM role; region defaults to the box's. SMS_SENDER is the
+    # alphanumeric sender ID (needs registration/origination for PT). Empty region
+    # or a boto3/permission failure → channel stays inert (logs, delivered=False).
+    AWS_SMS_REGION: str = os.environ.get("AWS_SMS_REGION", os.environ.get("AWS_REGION", "eu-west-1"))
+    SMS_SENDER: str = os.environ.get("SMS_SENDER", "DSCredito")
+
+    # ---- WhatsApp via Evolution API (self-hosted) ----
+    # All three must be set for the channel to be active; otherwise it stays inert.
+    EVOLUTION_API_URL: str = os.environ.get("EVOLUTION_API_URL", "")
+    EVOLUTION_API_KEY: str = os.environ.get("EVOLUTION_API_KEY", "")
+    EVOLUTION_INSTANCE: str = os.environ.get("EVOLUTION_INSTANCE", "")
+
     CHAT_MODEL: str = "claude-sonnet-4-6"
     NEWSLETTER_MODEL: str = "claude-sonnet-4-6"
 

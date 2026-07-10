@@ -16,14 +16,47 @@ import os
 from datetime import date
 
 import anthropic
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
 
 from ..config import settings
-from ..core.wa_client import send_text, is_demo_recipient
+from ..core.channels import CHANNELS
+from ..core.dispatcher import enqueue
+from ..core.mailer import branded_email
+from ..core.wa_client import is_demo_recipient
 from ..db import supabase
+from .auth import COOKIE_NAME, token_user
 
 router = APIRouter()
+
+
+def _can_author(request: Request) -> bool:
+    """Per-user newsletter-authoring grant (platform_users.can_newsletter).
+    Env-only admin logins (ds/amin, no DB row) keep access."""
+    username = token_user(request.cookies.get(COOKIE_NAME))
+    if not username:
+        return False
+    try:
+        row = (
+            supabase()
+            .table("platform_users")
+            .select("can_newsletter")
+            .eq("username", username)
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+            .data
+        )
+    except Exception:
+        row = None
+    if not row:
+        return True  # env-only admin login
+    return bool(row[0].get("can_newsletter"))
+
+
+def _require_author(request: Request) -> None:
+    if not _can_author(request):
+        raise HTTPException(403, "Sem permissão para criar ou enviar newsletters.")
 
 
 SYSTEM_PROMPT = """You are the editorial writer for DS Crédito Ramada, a Portuguese credit and
@@ -51,7 +84,8 @@ class GenerateBody(BaseModel):
 
 
 @router.post("/generate")
-def generate_newsletter(body: GenerateBody):
+def generate_newsletter(body: GenerateBody, request: Request):
+    _require_author(request)
     if not settings.ANTHROPIC_API_KEY:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
 
@@ -163,8 +197,9 @@ class ReformatBody(BaseModel):
 
 
 @router.post("/upload")
-async def upload_newsletter(file: UploadFile = File(...), titulo_hint: str | None = None):
+async def upload_newsletter(request: Request, file: UploadFile = File(...), titulo_hint: str | None = None):
     """Accept a .txt / .md file (and best-effort .docx), reformat into DS house style."""
+    _require_author(request)
     raw_bytes = await file.read()
     fname = (file.filename or "").lower()
 
@@ -189,8 +224,9 @@ async def upload_newsletter(file: UploadFile = File(...), titulo_hint: str | Non
 
 
 @router.post("/reformat")
-def reformat_newsletter(body: ReformatBody):
+def reformat_newsletter(body: ReformatBody, request: Request):
     """Paste raw text → reformat. Same code path as /upload, just no file involved."""
+    _require_author(request)
     return _reformat_to_newsletter(body.raw_text, titulo_hint=body.titulo_hint)
 
 
@@ -235,7 +271,8 @@ class EditBody(BaseModel):
 
 
 @router.post("/{newsletter_id}/edit")
-def edit_newsletter(newsletter_id: str, body: EditBody):
+def edit_newsletter(newsletter_id: str, body: EditBody, request: Request):
+    _require_author(request)
     row = supabase().table("newsletters").update({"conteudo_md": body.conteudo_md}).eq(
         "id", newsletter_id
     ).execute().data
@@ -284,71 +321,84 @@ def _opted_in_recipients(sb) -> list[dict]:
     return out
 
 
+def _opted_in_emails(sb) -> list[str]:
+    """Emails of clientes who authorised marketing contact and have a usable email."""
+    out: list[str] = []
+    page, PAGE = 0, 1000
+    while True:
+        res = (
+            sb.table("clientes_real")
+            .select("email")
+            .eq("authorized_contact", True)
+            .range(page * PAGE, page * PAGE + PAGE - 1)
+            .execute()
+        )
+        batch = res.data or []
+        for r in batch:
+            e = (r.get("email") or "").strip()
+            if e and "@" in e:
+                out.append(e)
+        if len(batch) < PAGE:
+            break
+        page += 1
+    # de-dup, preserve order
+    seen: set[str] = set()
+    return [e for e in out if not (e in seen or seen.add(e))]
+
+
 class SendBody(BaseModel):
     newsletter_id: str
-    public_url: str | None = None   # frontend gives a link to the rendered HTML page
-    recipients_e164: list[str] | None = None   # if None → fan out to DEMO_RECIPIENTS
-    audience: str | None = None     # "opted_in" → target consenting clientes_real (gated)
+    canais: list[str] | None = None  # ['email','sms','whatsapp_evolution']; default ['email']
+    public_url: str | None = None    # link to the rendered HTML page
 
 
 @router.post("/send")
-async def send_newsletter(body: SendBody):
+def send_newsletter(body: SendBody, request: Request):
+    """Enqueue the newsletter over the chosen channel(s) to the opted-in audience.
+    Delivery is throttled by the messaging layer (batch/interval/cap per channel);
+    a channel with no service configured queues the messages but delivers nothing
+    until it is turned on."""
+    _require_author(request)
     sb = supabase()
     nr = sb.table("newsletters").select("*").eq("id", body.newsletter_id).execute().data
     if not nr:
         raise HTTPException(404, "Newsletter não encontrada")
     nl = nr[0]
 
-    opted_in_target = 0
-    if body.audience == "opted_in":
-        # Gate on CrediDesk marketing-contact consent. The opted-in list is the
-        # lawful target universe; under the Meta demo cap only verified numbers
-        # actually deliver, so we report the full target and deliver the subset.
-        contactable = _opted_in_recipients(sb)
-        opted_in_target = len(contactable)
-        recipients = [r["e164"] for r in contactable if is_demo_recipient(r["e164"])]
-        if not recipients:
-            raise HTTPException(
-                400,
-                f"{opted_in_target} clientes opted-in, mas nenhum tem número verificado na Meta "
-                "(demo). Em produção, o envio alcança todos os opted-in com telefone.",
+    canais = [c for c in (body.canais or ["email"]) if c in CHANNELS]
+    if not canais:
+        raise HTTPException(400, "Selecione pelo menos um canal válido (email, sms).")
+
+    link = body.public_url or f"{settings.APP_BASE_URL}/newsletter/{nl['id']}"
+    user = token_user(request.cookies.get(COOKIE_NAME))
+    teaser = f"{nl['titulo']}"
+
+    total = 0
+    por_canal: dict[str, int] = {}
+    for canal in canais:
+        if canal == "email":
+            dests = _opted_in_emails(sb)
+            corpo = branded_email(
+                nl["titulo"],
+                "Partilhamos consigo a mais recente newsletter da DS Crédito. "
+                "Clique abaixo para a ler na íntegra.",
+                cta_label="Ler a newsletter",
+                cta_url=link,
             )
-    elif body.recipients_e164 is None:
-        recipients = [r.strip() for r in (settings.DEMO_RECIPIENTS or "").split(",") if r.strip()]
-    else:
-        recipients = [r for r in body.recipients_e164 if is_demo_recipient(r)]
+            assunto = f"{nl['titulo']} — {settings.LOJA_NAME}"
+        else:  # sms / whatsapp_evolution → plain text + link
+            dests = [r["e164"] for r in _opted_in_recipients(sb)]
+            corpo = f"📬 {teaser}\n\nLeia na íntegra: {link}"
+            assunto = None
+        r = enqueue(
+            canal, dests, corpo, assunto=assunto,
+            ref_tipo="newsletter", ref_id=str(nl["id"]), criado_por=user,
+        )
+        por_canal[canal] = r["enqueued"]
+        total += r["enqueued"]
 
-    if not recipients:
-        raise HTTPException(400, "Sem destinatários verificados — adicione números ao DEMO_RECIPIENTS")
+    sb.table("newsletters").update(
+        {"enviado_em": date.today().isoformat(), "destinatarios_count": total}
+    ).eq("id", body.newsletter_id).execute()
 
-    link = body.public_url or f"https://dscredito.synertia-gw.ai/newsletter/{nl['id']}"
-    body_text = (
-        f"📬 Newsletter da {settings.LOJA_NAME}\n\n"
-        f"{nl['titulo']}\n\n"
-        f"Leia na íntegra: {link}"
-    )
-
-    results = []
-    for to in recipients:
-        try:
-            r = await send_text(to, body_text)
-            results.append({"to": to, "ok": True, "wa": r})
-            sb.table("mensagens").insert({
-                "to_e164": to,
-                "canal": "whatsapp",
-                "corpo": body_text,
-                "status": "sent",
-            }).execute()
-        except Exception as e:
-            results.append({"to": to, "ok": False, "error": str(e)})
-
-    sb.table("newsletters").update({
-        "enviado_em": date.today().isoformat(),
-        "destinatarios_count": sum(1 for r in results if r["ok"]),
-    }).eq("id", body.newsletter_id).execute()
-
-    return {
-        "sent": sum(1 for r in results if r["ok"]),
-        "opted_in_target": opted_in_target,   # full lawful audience (0 if not an opted_in send)
-        "results": results,
-    }
+    return {"enqueued": total, "por_canal": por_canal, "canais": canais}
