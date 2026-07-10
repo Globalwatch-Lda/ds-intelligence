@@ -209,7 +209,6 @@ function Console({ status }: { status: Status }) {
           )))}
         </div>
         <textarea value={corpo} onChange={(e) => setCorpo(e.target.value)} rows={5} placeholder="Escreva a mensagem ou escolha um template acima…" className="w-full rounded-xl border border-ink-200 px-3 py-2 text-sm" />
-        <p className="text-xs text-ink-400">Placeholders resolvidos no envio: <code>{'{{nome_cliente}}'}</code> → {nomeCliente || 'cliente'}, <code>{'{{nome_consultor}}'}</code> → {nomeConsultor || 'você'}.</p>
 
         {/* Agendamento */}
         <div className="flex flex-wrap items-center gap-3">
