@@ -16,6 +16,11 @@ from ..db import supabase
 
 router = APIRouter()
 
+# Estados de lead fechados no CrediDesk — não são pipeline de leads:
+#   Concluido = já convertida em processo (hoje é cliente, vive em Clientes-live)
+#   Perdido/Anulado = morta. Só "Pendente" (em aberto) é uma lead por trabalhar.
+CLOSED_STATES = {"Concluido", "Concluído", "Perdido", "Anulado"}
+
 
 def _shape(r: dict) -> dict:
     """Map a leads_real row to the shape the frontend Lead table expects."""
@@ -36,7 +41,7 @@ def _shape(r: dict) -> dict:
 
 
 @router.get("/list")
-def list_leads(request: Request, limit: int = 200):
+def list_leads(request: Request, limit: int = 1000):
     sb = supabase()
     scope = user_scope(request)  # None = loja-wide; else this user's filter
     q = apply_scope(
@@ -54,4 +59,6 @@ def list_leads(request: Request, limit: int = 200):
         .data
         or []
     )
-    return {"leads": [_shape(r) for r in rows]}
+    # Só leads em aberto (Pendente) — as convertidas/perdidas não são pipeline.
+    abertas = [r for r in rows if r.get("state_name") not in CLOSED_STATES]
+    return {"leads": [_shape(r) for r in abertas]}
