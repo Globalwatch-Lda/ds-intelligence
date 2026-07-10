@@ -25,14 +25,18 @@ def _cfg(sb, canal: str) -> dict:
 
 
 def _user_evolution_instance(sb, username: str | None) -> str | None:
-    """The sender's own WhatsApp instance (their number), for 'em nome do utilizador'."""
+    """The sender's own WhatsApp instance (their number), for 'em nome do utilizador'.
+    Falls back to the deterministic name (ds_<username>) so logins without a stored
+    instance still route through their own instance."""
     if not username:
         return None
+    from .evolution import instance_name_for
+
     row = (
         sb.table("platform_users").select("evolution_instance").eq("username", username).limit(1).execute().data
         or [None]
     )[0]
-    return (row or {}).get("evolution_instance")
+    return (row or {}).get("evolution_instance") or instance_name_for(username)
 
 
 def enqueue_many(

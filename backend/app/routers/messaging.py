@@ -132,9 +132,9 @@ def wa_status(request: Request):
         sb.table("platform_users").select("evolution_instance").eq("username", username).limit(1).execute().data
         or [None]
     )[0]
-    inst = (row or {}).get("evolution_instance")
-    if not inst:
-        return {"configured": True, "instance": None, "connected": False, "state": None}
+    # Resolve deterministically (ds_<username>) so a login without a stored instance
+    # — e.g. the env-admin 'ds' — still reflects a live WhatsApp connection.
+    inst = (row or {}).get("evolution_instance") or evo.instance_name_for(username or "")
     st = evo.connection_state(inst)
     return {"configured": True, "instance": inst, "connected": st.get("connected"), "state": st.get("state")}
 
@@ -168,7 +168,7 @@ def wa_logout(request: Request):
         sb.table("platform_users").select("evolution_instance").eq("username", username).limit(1).execute().data
         or [None]
     )[0]
-    inst = (row or {}).get("evolution_instance")
+    inst = (row or {}).get("evolution_instance") or evo.instance_name_for(username or "")
     if inst:
         evo.logout_instance(inst)
     return {"ok": True}
