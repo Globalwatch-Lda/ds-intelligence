@@ -205,13 +205,14 @@ class BroadcastBody(BaseModel):
     consultor_id: str
     tipo: Literal["welcome", "custom"] = "welcome"
     template: str | None = None
+    destinatarios: list[dict] | None = None  # [{nome_cliente, telefone}]; vazio/None = todos
 
 
 @router.post("/preview")
 def preview_broadcast(body: BroadcastBody):
     sb = supabase()
     nome_consultor = fix_name(body.consultor_id) or body.consultor_id
-    contactos = _clientes_do_gestor(sb, body.consultor_id)
+    contactos = body.destinatarios if body.destinatarios else _clientes_do_gestor(sb, body.consultor_id)
     template = body.template or _welcome_template(settings.LOJA_NAME)
     sample = contactos[0] if contactos else {"nome_cliente": "(exemplo)"}
     instance = _consultor_instance(sb, body.consultor_id)
@@ -233,9 +234,9 @@ def send_broadcast(body: BroadcastBody, request: Request):
 
     sb = supabase()
     nome_consultor = fix_name(body.consultor_id) or body.consultor_id
-    contactos = _clientes_do_gestor(sb, body.consultor_id)
+    contactos = body.destinatarios if body.destinatarios else _clientes_do_gestor(sb, body.consultor_id)
     if not contactos:
-        raise HTTPException(400, "Este consultor não tem contactos com telefone.")
+        raise HTTPException(400, "Sem destinatários (nenhum contacto com telefone).")
 
     template = body.template or _welcome_template(settings.LOJA_NAME)
     instance = _consultor_instance(sb, body.consultor_id)
