@@ -24,7 +24,16 @@ const PAGE_CAP: Record<string, string> = {
   '/newsletter': 'page.newsletter',
   '/recap': 'page.recap',
   '/clientes-live': 'page.crm_live',
+  '/whatsapp': 'messaging.send',
 };
+
+// Inline chat-bubble icon for the WhatsApp nav item (avoids depending on a
+// package icon export).
+const IconWhatsApp = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.9-.9L3 21l1.9-5.6a8.5 8.5 0 0 1-.9-3.9A8.38 8.38 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5z" />
+  </svg>
+);
 
 // Versão: [plataforma].[pacote UI] build [git]. A plataforma está na v1; o git
 // sha é injetado no build (NEXT_PUBLIC_BUILD_SHA, ver deploy.sh).
@@ -46,6 +55,7 @@ const config: SynertiaConfig = {
     { href: '/dashboard', label: 'Dashboard', icon: <IconDashboard /> },
     { href: '/leads', label: 'Leads', icon: <IconLeads /> },
     { href: '/newsletter', label: 'Newsletter', icon: <IconNewsletter /> },
+    { href: '/whatsapp', label: 'WhatsApp', icon: IconWhatsApp },
     { href: '/recap', label: 'Recap semanal', icon: <IconReport /> },
   ],
   liveLink: { href: '/clientes-live', label: 'CRM em direto' },

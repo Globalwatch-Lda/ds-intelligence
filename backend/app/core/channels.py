@@ -12,9 +12,7 @@ communication (to colaboradores or clientes), not just newsletters.
 """
 from __future__ import annotations
 
-import json
 import logging
-import urllib.request
 
 from ..config import settings
 from .mailer import send_email
@@ -45,33 +43,29 @@ def _send_sms(dest: str, corpo: str, remetente: str | None) -> dict:
         return {"delivered": False, "error": str(e)}
 
 
-def _send_evolution(dest: str, corpo: str) -> dict:
-    url, key, inst = settings.EVOLUTION_API_URL, settings.EVOLUTION_API_KEY, settings.EVOLUTION_INSTANCE
-    if not (url and key and inst):
-        log.warning("[channels] Evolution not configured — would WhatsApp %s", dest)
+def _send_evolution(dest: str, corpo: str, instance: str | None) -> dict:
+    # `instance` is the SENDER's WhatsApp instance (their number); fall back to the
+    # loja-wide instance from env if a message has no per-user account attached.
+    from . import evolution as evo
+
+    inst = instance or settings.EVOLUTION_INSTANCE
+    if not (evo.configured() and inst):
+        log.warning("[channels] Evolution not configured / no instance — would WhatsApp %s", dest)
         return {"delivered": False, "error": "evolution not configured"}
-    try:
-        payload = json.dumps({"number": dest, "text": corpo}).encode("utf-8")
-        req = urllib.request.Request(
-            f"{url.rstrip('/')}/message/sendText/{inst}",
-            data=payload,
-            headers={"Content-Type": "application/json", "apikey": key},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=20) as resp:  # noqa: S310 (trusted, configured URL)
-            resp.read()
-        return {"delivered": True, "error": None}
-    except Exception as e:
-        log.error("[channels] Evolution send failed to %s: %s", dest, e)
-        return {"delivered": False, "error": str(e)}
+    r = evo.send_text(inst, dest, corpo)
+    return {"delivered": bool(r.get("ok")), "error": r.get("error")}
 
 
-def send_now(canal: str, destinatario: str, assunto: str | None, corpo: str, remetente: str | None = None) -> dict:
-    """Dispatch a single message over `canal`. Never raises."""
+def send_now(
+    canal: str, destinatario: str, assunto: str | None, corpo: str,
+    remetente: str | None = None, instance: str | None = None,
+) -> dict:
+    """Dispatch a single message over `canal`. Never raises. `instance` is the
+    sender's WhatsApp instance (only used by the whatsapp_evolution channel)."""
     if canal == "email":
         return _send_email(destinatario, assunto, corpo)
     if canal == "sms":
         return _send_sms(destinatario, corpo, remetente)
     if canal == "whatsapp_evolution":
-        return _send_evolution(destinatario, corpo)
+        return _send_evolution(destinatario, corpo, instance)
     return {"delivered": False, "error": f"canal desconhecido: {canal}"}

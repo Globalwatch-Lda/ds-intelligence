@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from ..core import evolution as evo
 from ..core.channels import CHANNELS
 from ..core.dispatcher import enqueue, process_due
 from ..core.scope import require_cap
@@ -20,6 +21,10 @@ from ..db import supabase
 from .auth import COOKIE_NAME, token_user
 
 router = APIRouter()
+
+
+def _acting_username(request: Request) -> str | None:
+    return token_user(request.cookies.get(COOKIE_NAME))
 
 
 @router.get("/config")
@@ -113,3 +118,57 @@ def dispatch(request: Request):
     """Send due messages now. Idempotent; also invoked by the cron worker."""
     require_cap(request, "messaging.config")
     return process_due()
+
+
+# ---- WhatsApp (Evolution) — each user connects their OWN number ----------
+@router.get("/whatsapp/status")
+def wa_status(request: Request):
+    require_cap(request, "messaging.send")
+    if not evo.configured():
+        return {"configured": False, "instance": None, "connected": False, "state": None}
+    username = _acting_username(request)
+    sb = supabase()
+    row = (
+        sb.table("platform_users").select("evolution_instance").eq("username", username).limit(1).execute().data
+        or [None]
+    )[0]
+    inst = (row or {}).get("evolution_instance")
+    if not inst:
+        return {"configured": True, "instance": None, "connected": False, "state": None}
+    st = evo.connection_state(inst)
+    return {"configured": True, "instance": inst, "connected": st.get("connected"), "state": st.get("state")}
+
+
+@router.post("/whatsapp/connect")
+def wa_connect(request: Request):
+    """Create (if needed) the acting user's WhatsApp instance and return the QR to scan."""
+    require_cap(request, "messaging.send")
+    if not evo.configured():
+        raise HTTPException(400, "O serviço WhatsApp (Evolution) não está configurado no servidor.")
+    username = _acting_username(request)
+    sb = supabase()
+    row = (
+        sb.table("platform_users").select("id, evolution_instance").eq("username", username).limit(1).execute().data
+        or [None]
+    )[0]
+    inst = (row or {}).get("evolution_instance") or evo.instance_name_for(username or "user")
+    evo.create_instance(inst)  # tolerated if it already exists
+    if row and not row.get("evolution_instance"):
+        sb.table("platform_users").update({"evolution_instance": inst}).eq("id", row["id"]).execute()
+    conn = evo.connect_instance(inst)
+    return {"configured": True, "instance": inst, "qr": conn.get("qr"), "code": conn.get("code")}
+
+
+@router.post("/whatsapp/logout")
+def wa_logout(request: Request):
+    require_cap(request, "messaging.send")
+    username = _acting_username(request)
+    sb = supabase()
+    row = (
+        sb.table("platform_users").select("evolution_instance").eq("username", username).limit(1).execute().data
+        or [None]
+    )[0]
+    inst = (row or {}).get("evolution_instance")
+    if inst:
+        evo.logout_instance(inst)
+    return {"ok": True}

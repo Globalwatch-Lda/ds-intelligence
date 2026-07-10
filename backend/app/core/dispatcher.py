@@ -24,6 +24,17 @@ def _cfg(sb, canal: str) -> dict:
     return {**_DEFAULT_CFG, **(row or {})}
 
 
+def _user_evolution_instance(sb, username: str | None) -> str | None:
+    """The sender's own WhatsApp instance (their number), for 'em nome do utilizador'."""
+    if not username:
+        return None
+    row = (
+        sb.table("platform_users").select("evolution_instance").eq("username", username).limit(1).execute().data
+        or [None]
+    )[0]
+    return (row or {}).get("evolution_instance")
+
+
 def enqueue(
     canal: str,
     destinatarios: list[str],
@@ -41,6 +52,10 @@ def enqueue(
     interval = max(0, int(cfg["intervalo_segundos"]))
     now = datetime.now(timezone.utc)
 
+    # For WhatsApp, freeze the sender's own instance now so each message goes out
+    # from their number even if their profile changes later.
+    canal_conta = _user_evolution_instance(sb, criado_por) if canal == "whatsapp_evolution" else None
+
     rows = []
     for i, dest in enumerate(destinatarios):
         if not dest:
@@ -55,6 +70,7 @@ def enqueue(
                 "ref_tipo": ref_tipo,
                 "ref_id": ref_id,
                 "criado_por": criado_por,
+                "canal_conta": canal_conta,
                 "status": "pendente",
                 "agendado_para": (now + timedelta(seconds=offset)).isoformat(),
             }
@@ -87,13 +103,16 @@ def process_due(max_per_run: int = 200) -> dict:
         if remaining <= 0:
             continue
         due = (
-            sb.table("envios").select("id, destinatario, assunto, corpo")
+            sb.table("envios").select("id, destinatario, assunto, corpo, canal_conta")
             .eq("canal", canal).eq("status", "pendente").lte("agendado_para", now.isoformat())
             .order("agendado_para").limit(min(remaining, max_per_run)).execute().data or []
         )
         sent = falhou = 0
         for e in due:
-            res = send_now(canal, e["destinatario"], e.get("assunto"), e["corpo"], cfg.get("remetente"))
+            res = send_now(
+                canal, e["destinatario"], e.get("assunto"), e["corpo"],
+                cfg.get("remetente"), instance=e.get("canal_conta"),
+            )
             sb.table("envios").update(
                 {
                     "status": "enviado" if res["delivered"] else "falhou",
