@@ -16,18 +16,50 @@ operator sees the actual delivery during the meeting.
 from __future__ import annotations
 import csv
 import io
+from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from pydantic import BaseModel
 
 from ..config import settings
+from ..core.dispatcher import enqueue_many
+from ..core.evolution import instance_name_for
 from ..core.names import fix_name
 from ..core.scope import apply_scope, user_scope
-from ..core.wa_client import send_text, is_demo_recipient
 from ..db import supabase
+from .auth import COOKIE_NAME, token_user
 
 router = APIRouter()
+
+
+def _consultor_instance(sb, consultor_id: str) -> str | None:
+    """The consultor's own WhatsApp (Evolution) instance, if they have an app account
+    mapped to this CRM manager. None → the caller falls back to the operator's number."""
+    try:
+        mid = int(consultor_id)
+    except (ValueError, TypeError):
+        return None
+    r = (
+        sb.table("platform_users").select("username, evolution_instance")
+        .eq("manager_crm_id", mid).limit(1).execute().data
+    )
+    if not r:
+        return None
+    u = r[0]
+    return u.get("evolution_instance") or instance_name_for(u.get("username") or "")
+
+
+def _wa_number(raw: str | None) -> str | None:
+    """Digits-only number with PT country code (no +) for the Evolution channel."""
+    if not raw:
+        return None
+    digits = "".join(ch for ch in str(raw) if ch.isdigit())
+    if not digits:
+        return None
+    if len(digits) == 9 and digits[0] == "9":  # bare PT mobile
+        digits = "351" + digits
+    return digits
 
 
 def _crm_consultores(sb, scope=None) -> list[dict]:
@@ -221,14 +253,12 @@ def preview_broadcast(body: BroadcastBody):
 
     contactos = sb.table("contactos_consultor").select(
         "id, nome_cliente, telefone"
-    ).eq("consultor_id", body.consultor_id).execute().data
+    ).eq("consultor_id", body.consultor_id).execute().data or []
 
     template = body.template or _welcome_template(settings.LOJA_NAME)
     sample = contactos[0] if contactos else {"nome_cliente": "(exemplo)", "telefone": ""}
     sample_render = _render(template, nome_consultor, sample["nome_cliente"])
-
-    demo_phone = _first_demo_recipient()
-    redirect_count = sum(1 for c in contactos if not is_demo_recipient(c["telefone"]))
+    instance = _consultor_instance(sb, body.consultor_id)
 
     return {
         "consultor_nome": nome_consultor,
@@ -236,13 +266,16 @@ def preview_broadcast(body: BroadcastBody):
         "sample_recipient": sample["nome_cliente"],
         "sample_message": sample_render,
         "template": template,
-        "demo_redirect_to": demo_phone,
-        "demo_redirect_count": redirect_count,
+        "sender": "número do próprio consultor" if instance else "número do operador",
+        "por_numero_proprio": bool(instance),
     }
 
 
 @router.post("/send")
-async def send_broadcast(body: BroadcastBody):
+def send_broadcast(body: BroadcastBody, request: Request):
+    """Enqueue the blast on the WhatsApp (Evolution) channel — throttled by the
+    messaging config — sending from the consultor's OWN number when they have a
+    linked WhatsApp, else from the operator's."""
     sb = supabase()
     nome_consultor = _consultor_nome(sb, body.consultor_id)
     if not nome_consultor:
@@ -250,62 +283,39 @@ async def send_broadcast(body: BroadcastBody):
 
     contactos = sb.table("contactos_consultor").select(
         "id, nome_cliente, telefone"
-    ).eq("consultor_id", body.consultor_id).execute().data
+    ).eq("consultor_id", body.consultor_id).execute().data or []
     if not contactos:
         raise HTTPException(400, "Este consultor ainda não tem contactos carregados.")
 
     template = body.template or _welcome_template(settings.LOJA_NAME)
-    demo_fallback = _first_demo_recipient()
+    instance = _consultor_instance(sb, body.consultor_id)  # consultor's own number, or None
+    user = token_user(request.cookies.get(COOKIE_NAME))
 
-    bc = sb.table("broadcasts").insert({
+    itens = []
+    for c in contactos:
+        dest = _wa_number(c["telefone"])
+        if dest:
+            itens.append({"destinatario": dest, "corpo": _render(template, nome_consultor, c["nome_cliente"])})
+
+    r = enqueue_many(
+        "whatsapp_evolution", itens,
+        ref_tipo=body.tipo, ref_id=str(body.consultor_id),
+        criado_por=user, canal_conta=instance,
+    )
+
+    sb.table("broadcasts").insert({
         "consultor_id": body.consultor_id,
         "tipo": body.tipo,
         "template": template,
-        "destinatarios_count": len(contactos),
-    }).execute().data[0]
-
-    ok = 0
-    fail = 0
-    results = []
-
-    for c in contactos:
-        msg = _render(template, nome_consultor, c["nome_cliente"])
-        to_phone = c["telefone"] if is_demo_recipient(c["telefone"]) else demo_fallback
-        if not to_phone:
-            fail += 1
-            results.append({"to": c["telefone"], "ok": False, "reason": "no_demo_recipient_configured"})
-            continue
-        try:
-            resp = await send_text(to_phone, msg)
-            if isinstance(resp, dict) and resp.get("meta_error"):
-                fail += 1
-                results.append({"to": to_phone, "ok": False, "meta": resp.get("body")})
-                continue
-            ok += 1
-            results.append({"to": to_phone, "ok": True, "for_cliente": c["nome_cliente"]})
-            sb.table("mensagens").insert({
-                "to_e164": to_phone,
-                "canal": "whatsapp",
-                "corpo": msg,
-                "status": "sent",
-            }).execute()
-        except Exception as e:
-            fail += 1
-            results.append({"to": to_phone, "ok": False, "error": str(e)})
-
-    sb.table("broadcasts").update({
-        "enviado_em": "now()",
-        "enviados_ok": ok,
-        "enviados_falha": fail,
-    }).eq("id", bc["id"]).execute()
+        "destinatarios_count": r["enqueued"],
+        "enviado_em": datetime.now(timezone.utc).isoformat(),
+    }).execute()
 
     return {
-        "broadcast_id": bc["id"],
         "consultor_nome": nome_consultor,
+        "enqueued": r["enqueued"],
         "total": len(contactos),
-        "ok": ok,
-        "fail": fail,
-        "results": results,
+        "por_numero_proprio": bool(instance),
     }
 
 

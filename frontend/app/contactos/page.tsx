@@ -103,7 +103,7 @@ export default function ContactosPage() {
     if (!selectedId) return;
     setSending(true);
     try {
-      const r = await api<{ ok: number; fail: number; total: number }>('/api/broadcasts/send', {
+      const r = await api<{ enqueued: number; total: number; por_numero_proprio: boolean }>('/api/broadcasts/send', {
         method: 'POST',
         body: JSON.stringify({
           consultor_id: selectedId,
@@ -111,7 +111,7 @@ export default function ContactosPage() {
           template: tipo === 'custom' ? customMsg : welcomeMsg || null,
         }),
       });
-      setStatus(`✓ Disparado: ${r.ok}/${r.total} entregues, ${r.fail} falharam.`);
+      setStatus(`✓ ${r.enqueued} mensagem(ns) em fila — entrega faseada ${r.por_numero_proprio ? 'pelo número do próprio consultor' : 'pelo número do operador'}.`);
       setPreview(null);
     } catch (e: any) {
       setStatus(`Erro: ${e.message}`);
@@ -285,11 +285,11 @@ export default function ContactosPage() {
               {preview.sample_message}
             </div>
 
-            {preview.demo_redirect_count > 0 && (
-              <div className="text-xs rounded-lg bg-ds-50 text-ds-700 px-3 py-2 mb-4">
-                ℹ️ Modo demo: <strong>{preview.demo_redirect_count}</strong> contactos têm números ainda não verificados pelo Meta — serão redireccionados para o seu número de teste durante a demo. Em produção, com os números reais autorizados ou com templates Meta aprovados, vão directamente para os clientes.
-              </div>
-            )}
+            <div className="text-xs rounded-lg bg-ink-50 text-ink-500 px-3 py-2 mb-4">
+              ℹ️ Envio faseado via WhatsApp {preview.por_numero_proprio
+                ? 'pelo número do próprio consultor'
+                : 'pelo número do operador (este consultor ainda não ligou o WhatsApp dele)'}. Respeita os limites de lote/intervalo configurados.
+            </div>
 
             <div className="flex justify-end gap-2">
               <button className="btn-ghost" onClick={() => setPreview(null)}>Cancelar</button>

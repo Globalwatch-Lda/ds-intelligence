@@ -45,10 +45,12 @@ def enqueue_many(
     ref_tipo: str | None = None,
     ref_id: str | None = None,
     criado_por: str | None = None,
+    canal_conta: str | None = None,
 ) -> dict:
     """Queue per-recipient messages (each with its own corpo/assunto) for one
     channel, spacing batches per config. `itens`: [{destinatario, corpo, assunto?}].
-    Used when the body is personalised (e.g. a per-client unsubscribe link)."""
+    `canal_conta` (WhatsApp) forces a specific sender instance; if omitted it is
+    derived from criado_por."""
     sb = supabase()
     cfg = _cfg(sb, canal)
     batch = max(1, int(cfg["batch_size"]))
@@ -57,7 +59,8 @@ def enqueue_many(
 
     # For WhatsApp, freeze the sender's own instance now so each message goes out
     # from their number even if their profile changes later.
-    canal_conta = _user_evolution_instance(sb, criado_por) if canal == "whatsapp_evolution" else None
+    if canal == "whatsapp_evolution" and not canal_conta:
+        canal_conta = _user_evolution_instance(sb, criado_por)
 
     rows = []
     for i, it in enumerate(x for x in itens if x.get("destinatario")):
