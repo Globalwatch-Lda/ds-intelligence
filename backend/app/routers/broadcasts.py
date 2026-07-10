@@ -18,14 +18,40 @@ import csv
 import io
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from pydantic import BaseModel
 
 from ..config import settings
+from ..core.names import fix_name
+from ..core.scope import apply_scope, user_scope
 from ..core.wa_client import send_text, is_demo_recipient
 from ..db import supabase
 
 router = APIRouter()
+
+
+def _crm_consultores(sb, scope=None) -> list[dict]:
+    """Distinct consultores from the CRM (processos_real managers), optionally scoped.
+    Returns [{crm_id, nome}]."""
+    q = apply_scope(sb.table("processos_real").select("manager_crm_id, manager_name"), scope)
+    rows = q.execute().data or []
+    seen: dict = {}
+    for r in rows:
+        mid = r.get("manager_crm_id")
+        if mid is None:
+            continue
+        seen.setdefault(mid, fix_name(r.get("manager_name")))
+    return [{"crm_id": mid, "nome": nome} for mid, nome in seen.items()]
+
+
+def _consultor_nome(sb, consultor_id: str) -> str | None:
+    """Consultor display name from the CRM by manager_crm_id (stored as text)."""
+    try:
+        mid = int(consultor_id)
+    except (ValueError, TypeError):
+        return None
+    r = sb.table("processos_real").select("manager_name").eq("manager_crm_id", mid).limit(1).execute().data
+    return fix_name(r[0]["manager_name"]) if r else None
 
 
 def _first_demo_recipient() -> str | None:
@@ -63,16 +89,27 @@ def get_welcome_template():
 
 
 @router.get("/consultores")
-def list_consultores_com_contagem():
+def list_consultores_com_contagem(request: Request):
+    """Consultores from the CRM (scoped to the acting user) + how many personal
+    contacts each has loaded. The contacts themselves are uploaded per consultor —
+    the CRM doesn't hold those, so counts start at 0 until loaded."""
     sb = supabase()
-    gestores = sb.table("gestores").select("id, nome, cargo, ativo").eq("ativo", True).execute().data
-    contactos = sb.table("contactos_consultor").select("consultor_id").execute().data
+    consultores = _crm_consultores(sb, user_scope(request))
+    contactos = sb.table("contactos_consultor").select("consultor_id").execute().data or []
     counts: dict[str, int] = {}
     for c in contactos:
-        cid = c["consultor_id"]
+        cid = str(c["consultor_id"])
         counts[cid] = counts.get(cid, 0) + 1
-    out = [{**g, "n_contactos": counts.get(g["id"], 0)} for g in gestores]
-    return {"consultores": sorted(out, key=lambda g: -g["n_contactos"])}
+    out = [
+        {
+            "id": str(c["crm_id"]),
+            "nome": c["nome"] or f"Gestor {c['crm_id']}",
+            "cargo": "Consultor",
+            "n_contactos": counts.get(str(c["crm_id"]), 0),
+        }
+        for c in consultores
+    ]
+    return {"consultores": sorted(out, key=lambda g: (-g["n_contactos"], g["nome"] or ""))}
 
 
 @router.get("/contactos")
@@ -98,8 +135,8 @@ async def upload_contactos(file: UploadFile = File(...)):
     def norm(s: str) -> str:
         return s.strip().lower().replace(" do ", "_").replace(" de ", "_").replace(" ", "_")
 
-    gestores = sb.table("gestores").select("id, nome").execute().data
-    name_to_id = {g["nome"].lower().strip(): g["id"] for g in gestores}
+    consultores = _crm_consultores(sb)
+    name_to_id = {c["nome"].lower().strip(): str(c["crm_id"]) for c in consultores if c["nome"]}
 
     inserted: dict[str, int] = {}
     skipped = 0
@@ -115,12 +152,12 @@ async def upload_contactos(file: UploadFile = File(...)):
             continue
         consultor_id = name_to_id.get(nome_consultor.lower().strip())
         if not consultor_id:
-            # Fallback: first-name + last-name partial match
+            # Fallback: first-name partial match against CRM consultores
             parts = nome_consultor.lower().split()
-            for g in gestores:
-                g_parts = g["nome"].lower().split()
-                if parts and parts[0] == g_parts[0]:
-                    consultor_id = g["id"]
+            for c in consultores:
+                c_parts = (c["nome"] or "").lower().split()
+                if parts and c_parts and parts[0] == c_parts[0]:
+                    consultor_id = str(c["crm_id"])
                     break
         if not consultor_id:
             skipped += 1
@@ -178,10 +215,9 @@ class BroadcastBody(BaseModel):
 @router.post("/preview")
 def preview_broadcast(body: BroadcastBody):
     sb = supabase()
-    g = sb.table("gestores").select("id, nome").eq("id", body.consultor_id).execute().data
-    if not g:
+    nome_consultor = _consultor_nome(sb, body.consultor_id)
+    if not nome_consultor:
         raise HTTPException(404, "Consultor não encontrado")
-    nome_consultor = g[0]["nome"]
 
     contactos = sb.table("contactos_consultor").select(
         "id, nome_cliente, telefone"
@@ -208,10 +244,9 @@ def preview_broadcast(body: BroadcastBody):
 @router.post("/send")
 async def send_broadcast(body: BroadcastBody):
     sb = supabase()
-    g = sb.table("gestores").select("id, nome").eq("id", body.consultor_id).execute().data
-    if not g:
+    nome_consultor = _consultor_nome(sb, body.consultor_id)
+    if not nome_consultor:
         raise HTTPException(404, "Consultor não encontrado")
-    nome_consultor = g[0]["nome"]
 
     contactos = sb.table("contactos_consultor").select(
         "id, nome_cliente, telefone"
