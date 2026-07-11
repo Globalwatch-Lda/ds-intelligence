@@ -661,6 +661,112 @@ function ComunicacaoTab() {
   );
 }
 
+// ---- Módulos tab ---------------------------------------------------------
+type ModuleState = {
+  id: string; label: string; installed: boolean; locked: boolean;
+  installed_version: string | null; available_version: string; channels: string[];
+};
+const INSTALL_CANAIS: { key: string; label: string }[] = [
+  { key: 'email', label: 'Email (AWS SES)' },
+  { key: 'sms', label: 'SMS (AWS SNS)' },
+  { key: 'whatsapp', label: 'WhatsApp (Evolution)' },
+];
+
+function InstallModuleDialog({
+  version, busy, onConfirm, onClose,
+}: {
+  version: string;
+  busy: boolean;
+  onConfirm: (channels: string[]) => void;
+  onClose: () => void;
+}) {
+  const [sel, setSel] = useState<Set<string>>(new Set(INSTALL_CANAIS.map((c) => c.key)));
+  const toggle = (k: string) => setSel((prev) => {
+    const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n;
+  });
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" onClick={onClose} role="dialog" aria-modal="true">
+      <div className="w-full max-w-md overflow-hidden rounded-xl border border-ink-100 bg-white text-ink-900 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="border-b border-ink-100 px-4 py-3">
+          <h2 className="text-sm font-semibold">Instalar Comunicação Multicanal <span className="text-ink-400">v{version}</span></h2>
+        </div>
+        <div className="space-y-4 px-4 py-4">
+          <p className="text-sm text-ink-500">Escolha os canais a instalar. Ficam desligados até os ativar na tab Comunicação.</p>
+          <div className="space-y-1.5">
+            {INSTALL_CANAIS.map((c) => (
+              <label key={c.key} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-ink-50">
+                <input type="checkbox" checked={sel.has(c.key)} onChange={() => toggle(c.key)} className="h-4 w-4 accent-[color:var(--accent)]" />
+                <span className="text-ink-800">{c.label}</span>
+              </label>
+            ))}
+          </div>
+          <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            A instalação é <b>definitiva</b> — depois de instalado, o módulo não se desativa.
+          </p>
+          <div className="flex items-center justify-end gap-3">
+            <button onClick={onClose} className="btn-ghost">Cancelar</button>
+            <button
+              onClick={() => onConfirm([...sel])}
+              disabled={busy || sel.size === 0}
+              className="btn-primary"
+            >
+              {busy ? 'A instalar …' : 'Confirmar instalação'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModulosTab() {
+  const { data, mutate } = useSWR<ModuleState>('/api/messaging/module', api);
+  const [popup, setPopup] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const m = data;
+
+  async function install(channels: string[]) {
+    setBusy(true);
+    try {
+      await api('/api/messaging/module/install', { method: 'POST', body: JSON.stringify({ channels }) });
+      await mutate();
+      setPopup(false);
+    } catch (e: any) { alert(e.message); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-ink-400">
+        Módulos da plataforma. Ligue a checkbox para instalar; a instalação é definitiva
+        (o módulo não se desativa).
+      </p>
+
+      <div className="card flex items-center justify-between gap-4">
+        <label className="flex min-w-0 items-start gap-3">
+          <input
+            type="checkbox"
+            checked={!!m?.installed}
+            disabled={!m || m.installed}
+            onChange={() => { if (m && !m.installed) setPopup(true); }}
+            className="mt-0.5 h-4 w-4 accent-[color:var(--accent)]"
+          />
+          <span className="min-w-0">
+            <span className="block font-medium text-ink-900">Comunicação Multicanal</span>
+            <span className="mt-0.5 block text-xs text-ink-400">Email · SMS · WhatsApp (Evolution)</span>
+          </span>
+        </label>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${m?.installed ? 'bg-green-100 text-green-700' : 'bg-ink-100 text-ink-400'}`}>
+          {m?.installed ? `instalado v${m.installed_version ?? m.available_version}` : m ? `disponível v${m.available_version}` : '…'}
+        </span>
+      </div>
+
+      {popup && m && (
+        <InstallModuleDialog version={m.available_version} busy={busy} onConfirm={install} onClose={() => setPopup(false)} />
+      )}
+    </div>
+  );
+}
+
 // ---- Loja tab ------------------------------------------------------------
 function LojaTab({ canEdit }: { canEdit: boolean }) {
   const { data, mutate } = useSWR<{ numero: string | null; nome: string | null }>('/api/settings/loja', api);
@@ -698,12 +804,13 @@ function LojaTab({ canEdit }: { canEdit: boolean }) {
 // ---- Page ----------------------------------------------------------------
 export default function ConfiguracoesPage() {
   const { can } = useMe();
-  type Tab = 'utilizadores' | 'perfis' | 'equipas' | 'comunicacao' | 'loja';
+  type Tab = 'utilizadores' | 'perfis' | 'equipas' | 'comunicacao' | 'modulos' | 'loja';
   const tabs: { key: Tab; label: string }[] = [
     { key: 'utilizadores', label: 'Utilizadores' },
     ...(can('teams.manage') ? [{ key: 'equipas' as Tab, label: 'Equipas' }] : []),
     ...(can('profiles.manage') ? [{ key: 'perfis' as Tab, label: 'Perfis' }] : []),
     ...(can('messaging.config') ? [{ key: 'comunicacao' as Tab, label: 'Comunicação' }] : []),
+    ...(can('messaging.config') ? [{ key: 'modulos' as Tab, label: 'Módulos' }] : []),
     { key: 'loja', label: 'Loja' },
   ];
   const [tab, setTab] = useState<Tab>('utilizadores');
@@ -731,6 +838,7 @@ export default function ConfiguracoesPage() {
       {tab === 'equipas' && can('teams.manage') && <EquipasTab />}
       {tab === 'perfis' && can('profiles.manage') && <PerfisTab />}
       {tab === 'comunicacao' && can('messaging.config') && <ComunicacaoTab />}
+      {tab === 'modulos' && can('messaging.config') && <ModulosTab />}
       {tab === 'loja' && <LojaTab canEdit={can('loja.edit')} />}
     </div>
   );
