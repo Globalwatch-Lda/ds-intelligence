@@ -20,11 +20,12 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 load_dotenv(BACKEND / ".env")
 
-from app.core.dispatcher import process_due  # noqa: E402
+from app.multicanal_ctx import build_ctx  # noqa: E402
+from synertia_multicanal import run_once  # noqa: E402
 
 
 def main() -> None:
-    result = process_due()
+    result = run_once(build_ctx())
     print(f"[dispatcher] {result}")
 
 

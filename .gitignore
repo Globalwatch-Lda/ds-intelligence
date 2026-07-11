@@ -9,3 +9,6 @@ __pycache__/
 venv/
 .DS_Store
 *.tsbuildinfo
+
+# Módulo synertia-multicanal — checkout git à parte (clonado no deploy, como o correio)
+backend/multicanal/

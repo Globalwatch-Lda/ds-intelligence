@@ -13,6 +13,7 @@ import {
 } from '@globalwatch-hub/synertia-ui';
 import ChatDock from './ChatDock';
 import UserFooter from './UserFooter';
+import { AboutDialog } from './AboutDialog';
 import { useMe } from '../lib/useMe';
 
 // Which capability each nav destination requires (mirrors the backend catalog in
@@ -38,7 +39,8 @@ const IconWhatsApp = (
 // Versão: [plataforma].[pacote UI] build [git]. A plataforma está na v1; o git
 // sha é injetado no build (NEXT_PUBLIC_BUILD_SHA, ver deploy.sh).
 const BUILD_SHA = (process.env.NEXT_PUBLIC_BUILD_SHA ?? '').slice(0, 7);
-const VERSION_LABEL = `1.${UI_VERSION}${BUILD_SHA ? ` build ${BUILD_SHA}` : ''}`;
+const PLATFORM_VERSION = `1.${UI_VERSION}`;
+const VERSION_LABEL = `${PLATFORM_VERSION}${BUILD_SHA ? ` build ${BUILD_SHA}` : ''}`;
 
 // DS Matrix client tokens for the shared Synertia chrome. Only these change per
 // platform; the navy chrome (responsive drawer + collapsible rail) lives in
@@ -65,6 +67,7 @@ const config: SynertiaConfig = {
 export default function AppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { me, caps } = useMe();
+  const [aboutOpen, setAboutOpen] = useState(false);
   // Nome da loja (configurável na tab Loja) escreve no cabeçalho; cai no default
   // do config enquanto não carrega.
   const [lojaNome, setLojaNome] = useState<string | null>(null);
@@ -86,15 +89,26 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
       <SynertiaShell
         config={cfg}
         brandSlot={
-          <span className="inline-block rounded-full border border-white/15 bg-white/10 px-2 py-0.5 text-[9px] font-semibold tracking-wider text-white/70 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setAboutOpen(true)}
+            title="Sobre a DS Matrix"
+            className="inline-block rounded-full border border-white/15 bg-white/10 px-2 py-0.5 text-[9px] font-semibold tracking-wider text-white/70 shadow-sm transition-colors hover:bg-white/20"
+          >
             {VERSION_LABEL}
-          </span>
+          </button>
         }
         userSlot={<UserFooter />}
       >
         {children}
       </SynertiaShell>
       {pathname !== '/login' && <ChatDock />}
+      <AboutDialog
+        open={aboutOpen}
+        onClose={() => setAboutOpen(false)}
+        platformVersion={PLATFORM_VERSION}
+        buildSha={BUILD_SHA || undefined}
+      />
     </>
   );
 }

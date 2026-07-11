@@ -19,8 +19,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .config import settings
-from .routers import dashboard, triggers, newsletter, chat, whatsapp, leads, broadcasts, crm_live, recap, auth, perfis, equipas, messaging, public, settings as settings_router
+from .routers import dashboard, triggers, newsletter, chat, whatsapp, leads, broadcasts, crm_live, recap, auth, perfis, equipas, public, settings as settings_router
 from .routers.auth import COOKIE_NAME, valid_token
+from .multicanal_ctx import build_ctx
+from synertia_multicanal import create_router as multicanal_router
 
 app = FastAPI(
     title="DS Intelligence v1",
@@ -87,6 +89,8 @@ app.include_router(crm_live.router, prefix="/api/crm-live", tags=["crm-live"])
 app.include_router(recap.router, prefix="/api/recap", tags=["recap"])
 app.include_router(perfis.router, prefix="/api/perfis", tags=["perfis"])
 app.include_router(equipas.router, prefix="/api/equipas", tags=["equipas"])
-app.include_router(messaging.router, prefix="/api/messaging", tags=["messaging"])
+# Comunicação Multicanal — servida pelo módulo empacotado `synertia-multicanal`
+# (substitui o antigo app.routers.messaging; API idêntica + /module e /settings).
+app.include_router(multicanal_router(build_ctx()), prefix="/api/messaging", tags=["messaging"])
 app.include_router(public.router, prefix="/api/public", tags=["public"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
