@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { IconSettings, useSidebarCollapsed } from '@globalwatch-hub/synertia-ui';
+import { IconSettings, useSidebarCollapsed } from '@globalwatch-lda/synertia-ui';
 import LogoutButton from './LogoutButton';
 import { useMe } from '../lib/useMe';
 

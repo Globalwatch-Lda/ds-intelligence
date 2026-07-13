@@ -1,7 +1,7 @@
 'use client';
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { SynertiaLoginShell } from '@globalwatch-hub/synertia-ui';
+import { SynertiaLoginShell } from '@globalwatch-lda/synertia-ui';
 
 function UnsubInner() {
   const params = useSearchParams();
