@@ -5,7 +5,7 @@ import {
   IconLeads,
   IconNewsletter,
   IconReport,
-} from '@globalwatch-hub/synertia-ui';
+} from '@globalwatch-lda/synertia-ui';
 
 const CARDS = [
   { href: '/contactos', title: 'Contactos', desc: 'Lista e gestão de contactos', color: '#7c3aed', icon: <IconContacts className="h-9 w-9" /> },

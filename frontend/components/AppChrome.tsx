@@ -10,7 +10,7 @@ import {
   IconNewsletter,
   IconReport,
   VERSION as UI_VERSION,
-} from '@globalwatch-hub/synertia-ui';
+} from '@globalwatch-lda/synertia-ui';
 import ChatDock from './ChatDock';
 import UserFooter from './UserFooter';
 import { AboutDialog } from './AboutDialog';
@@ -44,7 +44,7 @@ const VERSION_LABEL = `${PLATFORM_VERSION}${BUILD_SHA ? ` build ${BUILD_SHA}` : 
 
 // DS Matrix client tokens for the shared Synertia chrome. Only these change per
 // platform; the navy chrome (responsive drawer + collapsible rail) lives in
-// @globalwatch-hub/synertia-ui (>= 0.2.0).
+// @globalwatch-lda/synertia-ui (>= 0.2.0).
 const config: SynertiaConfig = {
   brandLogoSrc: '/logo-synertia.png',
   brandMarkSrc: '/logo-synertia-icon.png',

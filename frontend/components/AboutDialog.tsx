@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { VERSION as UI_VERSION } from '@globalwatch-hub/synertia-ui';
+import { VERSION as UI_VERSION } from '@globalwatch-lda/synertia-ui';
 
 // Diálogo "Sobre" da DS Matrix: versão da Plataforma, da Interface (UI) e dos
 // módulos instalados com a respetiva versão. A versão do módulo Comunicação

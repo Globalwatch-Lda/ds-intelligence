@@ -1,7 +1,7 @@
 'use client';
 import { Suspense, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { SynertiaLoginShell, SynertiaField, IconUser, IconLock } from '@globalwatch-hub/synertia-ui';
+import { SynertiaLoginShell, SynertiaField, IconUser, IconLock } from '@globalwatch-lda/synertia-ui';
 
 function LoginInner() {
   const router = useRouter();

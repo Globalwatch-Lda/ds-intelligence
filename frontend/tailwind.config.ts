@@ -1,12 +1,12 @@
 import type { Config } from 'tailwindcss';
 
 const config: Config = {
-  presets: [require('@globalwatch-hub/synertia-ui/tailwind-preset')],
+  presets: [require('@globalwatch-lda/synertia-ui/tailwind-preset')],
   content: [
     './app/**/*.{ts,tsx}',
     './components/**/*.{ts,tsx}',
     './lib/**/*.{ts,tsx}',
-    './node_modules/@globalwatch-hub/synertia-ui/src/**/*.{ts,tsx}',
+    './node_modules/@globalwatch-lda/synertia-ui/src/**/*.{ts,tsx}',
   ],
   theme: {
     extend: {

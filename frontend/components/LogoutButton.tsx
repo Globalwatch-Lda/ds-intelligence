@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { UserPill } from '@globalwatch-hub/synertia-ui';
+import { UserPill } from '@globalwatch-lda/synertia-ui';
 
 // DS-specific auth wiring around the shared UserPill: fetch the display name and
 // handle logout against the platform's session API.
