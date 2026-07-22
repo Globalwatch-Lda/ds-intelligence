@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from ..config import settings
 from ..core.scope import user_scope, apply_scope
+from ..core.valores import valor_financiamento
 from ..db import supabase
 
 router = APIRouter()
@@ -117,7 +118,7 @@ def _trim_processo(p: dict) -> dict:
         "consultor": p.get("manager_name"),
         "estado": p.get("state_name"),
         "tipo": p.get("type_name"),
-        "valor": p.get("financing_amount"),
+        "valor": valor_financiamento(p),
         "docs_obrigatorios": p.get("docs_mandatory"),
         "docs_carregados": p.get("docs_uploaded"),
         "docs_validados": p.get("docs_validated"),
@@ -164,7 +165,7 @@ def _crm_snapshot(scope: dict | None = None) -> dict:
         sb, "processos_real",
         "crm_id, reference, customer_crm_id, customer_name, customer_tax_number, "
         "customer_telephone, manager_name, state_name, type_name, financing_amount, "
-        "commission_amount, docs_mandatory, docs_uploaded, docs_validated, "
+        "financing_amount_finished, commission_amount, docs_mandatory, docs_uploaded, docs_validated, "
         "created_on_crm, updated_on_crm",
         scope=scope,
     )
@@ -231,7 +232,7 @@ def _crm_snapshot(scope: dict | None = None) -> dict:
         sn = p.get("state_name") or "—"
         b = proc_por_estado.setdefault(sn, {"count": 0, "volume_eur": 0.0})
         b["count"] += 1
-        b["volume_eur"] = round(b["volume_eur"] + _num(p.get("financing_amount")), 2)
+        b["volume_eur"] = round(b["volume_eur"] + valor_financiamento(p), 2)
 
     ano = today.year
     ganhos_ano = {"count": 0, "volume_eur": 0.0, "comissao_eur": 0.0}
@@ -241,11 +242,11 @@ def _crm_snapshot(scope: dict | None = None) -> dict:
             continue
         if p.get("state_name") == "Ganho":
             ganhos_ano["count"] += 1
-            ganhos_ano["volume_eur"] = round(ganhos_ano["volume_eur"] + _num(p.get("financing_amount")), 2)
+            ganhos_ano["volume_eur"] = round(ganhos_ano["volume_eur"] + valor_financiamento(p), 2)
             ganhos_ano["comissao_eur"] = round(ganhos_ano["comissao_eur"] + _num(p.get("commission_amount")), 2)
         elif p.get("state_name") in ("Anulado", "Perdido"):
             anulados_ano["count"] += 1
-            anulados_ano["volume_eur"] = round(anulados_ano["volume_eur"] + _num(p.get("financing_amount")), 2)
+            anulados_ano["volume_eur"] = round(anulados_ano["volume_eur"] + valor_financiamento(p), 2)
 
     leads_por_estado: dict[str, int] = {}
     for ld in leads_all:

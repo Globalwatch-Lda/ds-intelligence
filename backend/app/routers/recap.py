@@ -15,6 +15,7 @@ from fastapi import APIRouter, Request
 
 from ..config import settings
 from ..core.scope import user_scope, apply_scope
+from ..core.valores import valor_financiamento
 from ..db import supabase
 
 router = APIRouter()
@@ -86,7 +87,7 @@ def weekly_recap(
     processos = _select_all(
         sb, "processos_real",
         "crm_id, reference, customer_name, customer_telephone, manager_name, "
-        "state_id, state_name, type_name, financing_amount, commission_amount, "
+        "state_id, state_name, type_name, financing_amount, financing_amount_finished, commission_amount, "
         "docs_mandatory, docs_uploaded, docs_validated, created_on_crm, updated_on_crm, archived",
         scope=scope,
     )
@@ -120,12 +121,12 @@ def weekly_recap(
     for p in open_now:
         sn = p.get("state_name") or "—"
         open_by_state[sn] = open_by_state.get(sn, 0) + 1
-        open_volume_by_state[sn] = open_volume_by_state.get(sn, 0) + float(p.get("financing_amount") or 0)
+        open_volume_by_state[sn] = open_volume_by_state.get(sn, 0) + valor_financiamento(p)
         open_by_state_detail.setdefault(sn, []).append({
             "reference": p.get("reference"),
             "cliente": p.get("customer_name"),
             "tipo": p.get("type_name"),
-            "valor_eur": p.get("financing_amount"),
+            "valor_eur": valor_financiamento(p),
             "consultor": p.get("manager_name"),
         })
 
@@ -167,9 +168,9 @@ def weekly_recap(
     )
 
     # ----- totals & money flows -----
-    money_won = sum(float(p.get("financing_amount") or 0) for p in closed_won)
+    money_won = sum(valor_financiamento(p) for p in closed_won)
     commission_won = sum(float(p.get("commission_amount") or 0) for p in closed_won)
-    money_lost = sum(float(p.get("financing_amount") or 0) for p in closed_lost)
+    money_lost = sum(valor_financiamento(p) for p in closed_lost)
 
     return {
         "loja": settings.LOJA_NAME,
@@ -202,7 +203,7 @@ def weekly_recap(
                 "reference": p.get("reference"),
                 "cliente": p.get("customer_name"),
                 "tipo": p.get("type_name"),
-                "valor_eur": p.get("financing_amount"),
+                "valor_eur": valor_financiamento(p),
                 "comissao_eur": p.get("commission_amount"),
                 "consultor": p.get("manager_name"),
                 "fechado_em": p.get("updated_on_crm"),
@@ -214,7 +215,7 @@ def weekly_recap(
                 "reference": p.get("reference"),
                 "cliente": p.get("customer_name"),
                 "tipo": p.get("type_name"),
-                "valor_eur": p.get("financing_amount"),
+                "valor_eur": valor_financiamento(p),
                 "consultor": p.get("manager_name"),
                 "fechado_em": p.get("updated_on_crm"),
             }

@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from ..config import settings
 from ..core.scope import user_scope, apply_scope
 from ..core.wa_client import send_text, is_demo_recipient
+from ..core.valores import valor_financiamento
 from ..db import supabase
 
 router = APIRouter()
@@ -299,7 +300,7 @@ def list_trigger_rows(
         cli_by_id = {c["crm_id"]: c for c in clientes}
         processos = _select_all(
             sb, "processos_real",
-            "crm_id, customer_crm_id, state_name, updated_on_crm, financing_amount, manager_name"
+            "crm_id, customer_crm_id, state_name, updated_on_crm, financing_amount, financing_amount_finished, manager_name"
         )
         ganho_by_customer: dict[int, dict] = {}
         for p in processos:
@@ -332,7 +333,7 @@ def list_trigger_rows(
                 "gestor": p.get("manager_name"),
                 "data_escritura": esc.isoformat(),
                 "aniversario": anniv.isoformat(),
-                "valor_credito": p.get("financing_amount"),
+                "valor_credito": valor_financiamento(p),
                 "data_source": "live_approx",
             })
         return {"trigger": trigger, "rows": sorted(out, key=lambda r: r["aniversario"])}

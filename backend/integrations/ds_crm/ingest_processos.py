@@ -38,6 +38,7 @@ def normalise(row: dict) -> dict:
         "property_mortgage": row.get("propertyMortgage"),
         "archived": bool(row.get("archived")),
         "financing_amount": row.get("financingAmount"),
+        "financing_amount_finished": row.get("financingAmountFinished"),
         "commission_amount": row.get("commissionAmount"),
         "docs_mandatory": row.get("docsMandatory"),
         "docs_uploaded": row.get("docsUploaded"),
