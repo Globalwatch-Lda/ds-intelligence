@@ -43,6 +43,22 @@ _PROCESSO_COLS = (
 )
 
 
+def _limites() -> tuple[int, float]:
+    """Limites da Fase 2 (nº ficheiros, MB/ficheiro): loja_config > env default.
+    Editáveis na tab Loja das Configurações."""
+    n = settings.ANALISE_MAX_FICHEIROS
+    mb = settings.ANALISE_MAX_FILE_MB
+    try:
+        row = (supabase().table("loja_config")
+               .select("analise_max_ficheiros, analise_max_file_mb")
+               .eq("id", 1).limit(1).execute().data or [{}])[0]
+        n = int(row.get("analise_max_ficheiros") or n)
+        mb = float(row.get("analise_max_file_mb") or mb)
+    except Exception:
+        pass
+    return n, mb
+
+
 def _parse_date(s: str | None) -> date | None:
     if not s:
         return None
@@ -392,8 +408,8 @@ def analisar_conteudo(referencia: str, request: Request):
             prop_nome[pid_prop] = c["groupName"]
 
     ficheiros = lst.get("documents") or []
-    limite = settings.ANALISE_MAX_FICHEIROS
-    max_bytes = int(settings.ANALISE_MAX_FILE_MB * 1024 * 1024)
+    limite, max_mb = _limites()
+    max_bytes = int(max_mb * 1024 * 1024)
 
     # 1) pré-filtro rápido (metadados) — decide o que se analisa vs ignora
     candidatos, ignorados = [], []
@@ -404,7 +420,7 @@ def analisar_conteudo(referencia: str, request: Request):
             ignorados.append({"ficheiro": fname, "motivo": "formato não legível por visão (ex.: Office/zip)"})
             continue
         if (f.get("fileSize") or 0) > max_bytes:
-            ignorados.append({"ficheiro": fname, "motivo": f"ficheiro > {settings.ANALISE_MAX_FILE_MB:g} MB"})
+            ignorados.append({"ficheiro": fname, "motivo": f"ficheiro > {max_mb:g} MB"})
             continue
         if len(candidatos) >= limite:
             ignorados.append({"ficheiro": fname, "motivo": f"limite de {limite} ficheiros atingido"})
@@ -423,7 +439,7 @@ def analisar_conteudo(referencia: str, request: Request):
             if not b64:
                 return None, {"ficheiro": fname, "motivo": "sem conteúdo devolvido pelo CRM"}, []
             if len(b64) * 3 // 4 > max_bytes:
-                return None, {"ficheiro": fname, "motivo": f"ficheiro > {settings.ANALISE_MAX_FILE_MB:g} MB"}, []
+                return None, {"ficheiro": fname, "motivo": f"ficheiro > {max_mb:g} MB"}, []
             fsinais = _vision_sinais(doc_nome, proponente, fname, mt, b64)
         except Exception as e:
             return None, {"ficheiro": fname, "motivo": f"erro na análise ({type(e).__name__})"}, []

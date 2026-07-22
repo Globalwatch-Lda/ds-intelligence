@@ -768,18 +768,32 @@ function ModulosTab() {
 }
 
 // ---- Loja tab ------------------------------------------------------------
+type LojaCfg = {
+  numero: string | null; nome: string | null;
+  analise_max_ficheiros: number | null; analise_max_file_mb: number | null;
+};
 function LojaTab({ canEdit }: { canEdit: boolean }) {
-  const { data, mutate } = useSWR<{ numero: string | null; nome: string | null }>('/api/settings/loja', api);
-  const [f, setF] = useState({ numero: '', nome: '' });
+  const { data, mutate } = useSWR<LojaCfg>('/api/settings/loja', api);
+  const [f, setF] = useState({ numero: '', nome: '', analise_max_ficheiros: '', analise_max_file_mb: '' });
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { if (data) setF({ numero: data.numero ?? '', nome: data.nome ?? '' }); }, [data]);
+  useEffect(() => {
+    if (data) setF({
+      numero: data.numero ?? '', nome: data.nome ?? '',
+      analise_max_ficheiros: String(data.analise_max_ficheiros ?? ''),
+      analise_max_file_mb: String(data.analise_max_file_mb ?? ''),
+    });
+  }, [data]);
 
   async function save() {
     setBusy(true); setMsg(null);
     try {
-      await api('/api/settings/loja', { method: 'PUT', body: JSON.stringify(f) });
+      await api('/api/settings/loja', { method: 'PUT', body: JSON.stringify({
+        numero: f.numero, nome: f.nome,
+        analise_max_ficheiros: f.analise_max_ficheiros === '' ? null : Number(f.analise_max_ficheiros),
+        analise_max_file_mb: f.analise_max_file_mb === '' ? null : Number(f.analise_max_file_mb),
+      }) });
       setMsg('✓ Loja atualizada.'); mutate();
     } catch (e: any) { setMsg(`Erro: ${e.message}`); } finally { setBusy(false); }
   }
@@ -789,6 +803,18 @@ function LojaTab({ canEdit }: { canEdit: boolean }) {
     <section className="card max-w-md space-y-4">
       <Field label="Número da loja" value={f.numero} onChange={(e) => setF({ ...f, numero: e.target.value })} disabled={!canEdit} />
       <Field label="Nome da loja (aparece no cabeçalho)" value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} disabled={!canEdit} />
+
+      <div className="pt-2 border-t border-ink-100">
+        <p className="text-sm font-medium text-ink-700 mb-1">Análise documental — limites da leitura de ficheiros</p>
+        <p className="text-xs text-ink-400 mb-3">Controlam o custo/cobertura da análise profunda (Fase 2).</p>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Máx. ficheiros por processo (1–50)" type="number" value={f.analise_max_ficheiros}
+                 onChange={(e) => setF({ ...f, analise_max_ficheiros: e.target.value })} disabled={!canEdit} />
+          <Field label="Tamanho máx. por ficheiro (MB, 0.5–32)" type="number" value={f.analise_max_file_mb}
+                 onChange={(e) => setF({ ...f, analise_max_file_mb: e.target.value })} disabled={!canEdit} />
+        </div>
+      </div>
+
       {canEdit ? (
         <div className="flex items-center gap-3">
           <button onClick={save} disabled={busy} className="btn-primary">{busy ? 'A guardar …' : 'Guardar'}</button>

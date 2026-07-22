@@ -354,23 +354,38 @@ def list_managers(request: Request):
 # ---- loja config ---------------------------------------------------------
 @router.get("/loja")
 def get_loja():
+    from ..config import settings
     sb = supabase()
-    row = (sb.table("loja_config").select("numero, nome").eq("id", 1).limit(1).execute().data or [{}])[0]
-    return {"numero": row.get("numero"), "nome": row.get("nome")}
+    row = (sb.table("loja_config")
+           .select("numero, nome, analise_max_ficheiros, analise_max_file_mb")
+           .eq("id", 1).limit(1).execute().data or [{}])[0]
+    return {
+        "numero": row.get("numero"),
+        "nome": row.get("nome"),
+        # limites da Análise Documental (Fase 2): DB > env default
+        "analise_max_ficheiros": row.get("analise_max_ficheiros") or settings.ANALISE_MAX_FICHEIROS,
+        "analise_max_file_mb": row.get("analise_max_file_mb") or settings.ANALISE_MAX_FILE_MB,
+    }
 
 
 class LojaIn(BaseModel):
     numero: str | None = None
     nome: str | None = None
+    analise_max_ficheiros: int | None = None
+    analise_max_file_mb: float | None = None
 
 
 @router.put("/loja")
 def put_loja(body: LojaIn, request: Request):
     require_cap(request, "loja.edit")
     sb = supabase()
-    sb.table("loja_config").update(
-        {"numero": body.numero, "nome": body.nome, "updated_at": _now()}
-    ).eq("id", 1).execute()
+    upd = {"numero": body.numero, "nome": body.nome, "updated_at": _now()}
+    # limites: aceita valores sensatos; guarda tal como vêm (None não mexe se nulo)
+    if body.analise_max_ficheiros is not None:
+        upd["analise_max_ficheiros"] = max(1, min(int(body.analise_max_ficheiros), 50))
+    if body.analise_max_file_mb is not None:
+        upd["analise_max_file_mb"] = max(0.5, min(float(body.analise_max_file_mb), 32))
+    sb.table("loja_config").update(upd).eq("id", 1).execute()
     return {"ok": True}
 
 
