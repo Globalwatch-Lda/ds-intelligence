@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import base64
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 
 import anthropic
@@ -394,11 +395,9 @@ def analisar_conteudo(referencia: str, request: Request):
     limite = settings.ANALISE_MAX_FICHEIROS
     max_bytes = int(settings.ANALISE_MAX_FILE_MB * 1024 * 1024)
 
-    analisados, ignorados, sinais = [], [], []
+    # 1) pré-filtro rápido (metadados) — decide o que se analisa vs ignora
+    candidatos, ignorados = [], []
     for f in ficheiros:
-        if len(analisados) >= limite:
-            ignorados.append({"ficheiro": f.get("fileName"), "motivo": f"limite de {limite} ficheiros atingido"})
-            continue
         fname = f.get("fileName") or f"ficheiro-{f.get('id')}"
         mt = _media_type(fname)
         if not mt:
@@ -407,25 +406,39 @@ def analisar_conteudo(referencia: str, request: Request):
         if (f.get("fileSize") or 0) > max_bytes:
             ignorados.append({"ficheiro": fname, "motivo": f"ficheiro > {settings.ANALISE_MAX_FILE_MB:g} MB"})
             continue
+        if len(candidatos) >= limite:
+            ignorados.append({"ficheiro": fname, "motivo": f"limite de {limite} ficheiros atingido"})
+            continue
+        candidatos.append((f, fname, mt))
+
+    # 2) descarrega + lê cada ficheiro EM PARALELO (I/O-bound: download + visão).
+    # Sem paralelismo, N ficheiros em série estouram o timeout do nginx.
+    def _processar(item):
+        f, fname, mt = item
+        doc_nome = tipo_nome.get(f.get("documentId")) or "Documento"
+        proponente = prop_nome.get(f.get("creditProcessProponentId")) or (row.get("customer_name") or "—")
         try:
             file_obj = client.get_file(f["id"])
             b64 = (file_obj or {}).get("filebase64")
             if not b64:
-                ignorados.append({"ficheiro": fname, "motivo": "sem conteúdo devolvido pelo CRM"})
-                continue
-            # confirma tamanho real (base64 -> bytes) por segurança
+                return None, {"ficheiro": fname, "motivo": "sem conteúdo devolvido pelo CRM"}, []
             if len(b64) * 3 // 4 > max_bytes:
-                ignorados.append({"ficheiro": fname, "motivo": f"ficheiro > {settings.ANALISE_MAX_FILE_MB:g} MB"})
-                continue
-            doc_nome = tipo_nome.get(f.get("documentId")) or "Documento"
-            proponente = prop_nome.get(f.get("creditProcessProponentId")) or (row.get("customer_name") or "—")
+                return None, {"ficheiro": fname, "motivo": f"ficheiro > {settings.ANALISE_MAX_FILE_MB:g} MB"}, []
             fsinais = _vision_sinais(doc_nome, proponente, fname, mt, b64)
         except Exception as e:
-            ignorados.append({"ficheiro": fname, "motivo": f"erro na análise ({type(e).__name__})"})
-            continue
-        analisados.append({"ficheiro": fname, "documento": doc_nome,
-                           "proponente": proponente, "n_sinais": len(fsinais)})
-        sinais.extend(fsinais)
+            return None, {"ficheiro": fname, "motivo": f"erro na análise ({type(e).__name__})"}, []
+        return ({"ficheiro": fname, "documento": doc_nome, "proponente": proponente,
+                 "n_sinais": len(fsinais)}, None, fsinais)
+
+    analisados, sinais = [], []
+    if candidatos:
+        with ThreadPoolExecutor(max_workers=min(5, len(candidatos))) as ex:
+            for ok, ign, fsinais in ex.map(_processar, candidatos):
+                if ok:
+                    analisados.append(ok)
+                    sinais.extend(fsinais)
+                if ign:
+                    ignorados.append(ign)
 
     ordem = {"alto": 0, "medio": 1, "baixo": 2}
     sinais.sort(key=lambda s: ordem.get(s.get("severidade"), 3))
