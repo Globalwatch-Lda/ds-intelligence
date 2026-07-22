@@ -23,8 +23,11 @@ type Sinal = {
   severidade: 'alto' | 'medio' | 'baixo';
   titulo?: string;
   evidencia?: string;
-  verificacao: 'confirmado_dados' | 'a_verificar_no_ficheiro';
+  verificacao: 'confirmado_dados' | 'a_verificar_no_ficheiro' | 'confirmado_ficheiro';
   base_manual?: string;
+  ficheiro?: string;
+  documento?: string;
+  proponente?: string;
 };
 type DocGrupo = {
   proponente: string;
@@ -49,6 +52,14 @@ type Analise = {
   fonte: string;
   as_of: string;
 };
+type Conteudo = {
+  referencia: string;
+  total_ficheiros: number;
+  ficheiros_analisados: { ficheiro: string; documento: string; proponente: string; n_sinais: number }[];
+  ficheiros_ignorados: { ficheiro: string; motivo: string }[];
+  sinais_alerta: Sinal[];
+  nota_metodologia: string;
+};
 
 const EUR = (n?: number | null) =>
   (n ?? 0).toLocaleString('pt-PT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
@@ -63,6 +74,7 @@ const SEV_LABEL: Record<string, string> = { alto: 'Alto', medio: 'Médio', baixo
 const VERIF_LABEL: Record<string, string> = {
   confirmado_dados: 'Confirmado pelos dados',
   a_verificar_no_ficheiro: 'A verificar no documento',
+  confirmado_ficheiro: 'Confirmado no ficheiro',
 };
 
 export default function AnaliseDocumentalPage() {
@@ -70,19 +82,37 @@ export default function AnaliseDocumentalPage() {
   const [data, setData] = useState<Analise | null>(null);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const [conteudo, setConteudo] = useState<Conteudo | null>(null);
+  const [loadingConteudo, setLoadingConteudo] = useState(false);
+  const [erroConteudo, setErroConteudo] = useState<string | null>(null);
+
+  const limparErro = (msg: string) =>
+    msg.replace(/^API [^:]+→ \d+:\s*/, '').replace(/^\{.*"detail":"?/, '').replace(/"?\}?$/, '');
 
   async function analisar() {
     const r = ref.trim();
     if (!r) return;
-    setLoading(true); setErro(null); setData(null);
+    setLoading(true); setErro(null); setData(null); setConteudo(null); setErroConteudo(null);
     try {
       const res = await api<Analise>(`/api/analise-documental/${encodeURIComponent(r)}`);
       setData(res);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setErro(msg.replace(/^API [^:]+→ \d+:\s*/, '').replace(/^\{.*"detail":"?/, '').replace(/"?\}?$/, ''));
+      setErro(limparErro(e instanceof Error ? e.message : String(e)));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function analisarConteudo() {
+    if (!data) return;
+    setLoadingConteudo(true); setErroConteudo(null); setConteudo(null);
+    try {
+      const res = await api<Conteudo>(`/api/analise-documental/${encodeURIComponent(data.referencia)}/conteudo`, { method: 'POST' });
+      setConteudo(res);
+    } catch (e) {
+      setErroConteudo(limparErro(e instanceof Error ? e.message : String(e)));
+    } finally {
+      setLoadingConteudo(false);
     }
   }
 
@@ -197,6 +227,70 @@ export default function AnaliseDocumentalPage() {
                 {aVerificar.map((s, i) => (
                   <SinalCard key={i} s={s} />
                 ))}
+              </div>
+            )}
+          </section>
+
+          {/* Fase 2 — análise de conteúdo dos ficheiros */}
+          <section className="card">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div>
+                <h2 className="text-lg font-semibold text-ink-900">Análise profunda — conteúdo dos ficheiros</h2>
+                <p className="text-sm text-ink-400 mt-1 max-w-2xl">
+                  Descarrega os ficheiros do processo e lê o conteúdo (recibos, extratos, IRS,
+                  cartas patronais) para detetar somatórios errados, tipos de letra, recibos
+                  repetidos, QR/NIF e outras red-flags do manual. Tem custo por ficheiro.
+                </p>
+              </div>
+              <button className="btn-primary shrink-0" onClick={analisarConteudo} disabled={loadingConteudo}>
+                {loadingConteudo ? 'A ler ficheiros…' : 'Ler ficheiros'}
+              </button>
+            </div>
+            {erroConteudo && <p className="text-sm text-rose-700 mt-3">{erroConteudo}</p>}
+
+            {conteudo && (
+              <div className="mt-4 space-y-4">
+                <p className="text-sm text-ink-600">
+                  {conteudo.ficheiros_analisados.length} de {conteudo.total_ficheiros} ficheiros analisados
+                  {conteudo.ficheiros_ignorados.length > 0 && <> · {conteudo.ficheiros_ignorados.length} ignorados</>}
+                </p>
+
+                {conteudo.sinais_alerta.length === 0 ? (
+                  <p className="text-sm text-emerald-700">Nenhum sinal de alerta detetado no conteúdo dos ficheiros.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {conteudo.sinais_alerta.map((s, i) => (
+                      <div key={i}>
+                        <SinalCard s={s} />
+                        {(s.ficheiro || s.documento) && (
+                          <p className="text-xs text-ink-400 mt-1 ml-1">
+                            {s.documento}{s.ficheiro && <span className="font-mono"> · {s.ficheiro}</span>}
+                            {s.proponente && <> · {s.proponente}</>}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <details className="text-sm">
+                  <summary className="cursor-pointer text-ink-600">Ficheiros analisados e ignorados</summary>
+                  <div className="mt-2 space-y-1">
+                    {conteudo.ficheiros_analisados.map((f, i) => (
+                      <div key={`a${i}`} className="text-xs text-ink-600">
+                        <span className={f.n_sinais > 0 ? 'text-amber-700' : 'text-emerald-700'}>
+                          {f.n_sinais > 0 ? `⚠ ${f.n_sinais}` : '✓'}
+                        </span>{' '}
+                        <span className="font-mono">{f.ficheiro}</span> — {f.documento} ({f.proponente})
+                      </div>
+                    ))}
+                    {conteudo.ficheiros_ignorados.map((f, i) => (
+                      <div key={`i${i}`} className="text-xs text-ink-400">
+                        — <span className="font-mono">{f.ficheiro}</span>: {f.motivo}
+                      </div>
+                    ))}
+                  </div>
+                </details>
               </div>
             )}
           </section>
