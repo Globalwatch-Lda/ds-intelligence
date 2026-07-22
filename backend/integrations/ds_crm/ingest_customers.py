@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 from app.db import supabase  # noqa: E402
+from integrations.ds_crm.accounts import list_crm_accounts  # noqa: E402
 from integrations.ds_crm.client import CredidekClient  # noqa: E402
 
 
@@ -49,16 +50,28 @@ def main():
     }).execute()
     run_id = run.data[0]["id"]
 
-    client = CredidekClient()
-    batch: list[dict] = []
+    accounts = list_crm_accounts()
+    print(f"[ingest] {len(accounts)} conta(s) CRM: {[a.username for a in accounts]}")
     total_fetched = 0
     total_upserted = 0
     BATCH_SIZE = 100
 
+    # clientes_real has no source_accounts scoping — merge by crm_id across
+    # accounts (latest wins) and upsert each customer once.
+    merged: dict[int, dict] = {}
+
     try:
-        for row in client.iter_customers(page_size=50):
-            total_fetched += 1
-            batch.append(normalise(row))
+        for acct in accounts:
+            print(f"[ingest] --- conta {acct.username} ({acct.crm_email}) ---")
+            client = CredidekClient(email=acct.crm_email, password=acct.crm_password)
+            for row in client.iter_customers(page_size=50):
+                total_fetched += 1
+                norm = normalise(row)
+                merged[norm["crm_id"]] = norm
+
+        batch: list[dict] = []
+        for norm in merged.values():
+            batch.append(norm)
             if len(batch) >= BATCH_SIZE:
                 sb.table("clientes_real").upsert(batch, on_conflict="crm_id").execute()
                 total_upserted += len(batch)
@@ -74,7 +87,7 @@ def main():
             "rows_upserted": total_upserted,
             "finished_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", run_id).execute()
-        print(f"\n[done] fetched {total_fetched} customers, upserted {total_upserted}")
+        print(f"\n[done] fetched {total_fetched} customers, {len(merged)} distintos, upserted {total_upserted}")
     except Exception as e:
         sb.table("crm_sync_runs").update({
             "rows_fetched": total_fetched,
