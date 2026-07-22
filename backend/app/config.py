@@ -76,6 +76,10 @@ class Settings:
 
     CHAT_MODEL: str = "claude-sonnet-4-6"
     NEWSLETTER_MODEL: str = "claude-sonnet-4-6"
+    # Análise Documental Fase 2 (leitura do conteúdo dos ficheiros, com visão).
+    ANALISE_VISION_MODEL: str = os.environ.get("ANALISE_VISION_MODEL", "") or "claude-sonnet-4-6"
+    ANALISE_MAX_FICHEIROS: int = int(os.environ.get("ANALISE_MAX_FICHEIROS", "12"))
+    ANALISE_MAX_FILE_MB: float = float(os.environ.get("ANALISE_MAX_FILE_MB", "10"))
 
 
 settings = Settings()

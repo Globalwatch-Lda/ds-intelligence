@@ -19,6 +19,7 @@ ISOLAMENTO ENTRE LOJAS (garantido por construção):
 """
 from __future__ import annotations
 
+import base64
 import json
 from datetime import date, datetime, timezone
 
@@ -27,12 +28,18 @@ from fastapi import APIRouter, HTTPException, Request
 
 from ..config import settings
 from ..core.analise_documental_kb import (
-    FONTE, METODO, SINAIS_ALERTA, catalogo_para_prompt,
+    FONTE, METODO, SINAIS_ALERTA, catalogo_para_prompt, catalogo_conteudo_para_prompt,
 )
 from ..core.scope import user_scope, apply_scope, scope_label
 from ..db import supabase
 
 router = APIRouter()
+
+_PROCESSO_COLS = (
+    "crm_id, reference, customer_name, manager_name, state_name, type_name, "
+    "financing_amount, financing_amount_finished, created_on_crm, updated_on_crm, "
+    "source_account, source_accounts"
+)
 
 
 def _parse_date(s: str | None) -> date | None:
@@ -211,26 +218,27 @@ def _sinais_llm(processo: dict, proponentes: list[dict], docs: dict) -> list[dic
     return [s for s in sinais if s["no_catalogo"]]
 
 
-@router.get("/{referencia}")
-def analisar(referencia: str, request: Request):
-    referencia = referencia.strip()
+def _resolve(referencia: str, request: Request) -> tuple[dict, object]:
+    """Resolve a referência no mirror DESTA loja (com scope RBAC) e escolhe a
+    conta CRM DESTA loja. 404 se a referência não existe/está fora do âmbito —
+    é isto que garante o isolamento entre lojas."""
     sb = supabase()
     scope = user_scope(request)
     q = apply_scope(
-        sb.table("processos_real").select(
-            "crm_id, reference, customer_name, manager_name, state_name, type_name, "
-            "financing_amount, financing_amount_finished, created_on_crm, updated_on_crm, "
-            "source_account, source_accounts"
-        ),
-        scope,
-    ).eq("reference", referencia).limit(1)
+        sb.table("processos_real").select(_PROCESSO_COLS), scope
+    ).eq("reference", referencia.strip()).limit(1)
     rows = q.execute().data or []
     if not rows:
         raise HTTPException(404, f"Processo {referencia} não encontrado nesta loja (ou fora do seu âmbito de acesso).")
     row = rows[0]
-    pid = row["crm_id"]
+    sa = row.get("source_accounts") or ([row["source_account"]] if row.get("source_account") else [])
+    return row, _pick_account(sa)
 
-    acct = _pick_account(row.get("source_accounts") or ([row["source_account"]] if row.get("source_account") else []))
+
+@router.get("/{referencia}")
+def analisar(referencia: str, request: Request):
+    row, acct = _resolve(referencia, request)
+    pid = row["crm_id"]
 
     from integrations.ds_crm.client import CredidekClient
     try:
@@ -279,4 +287,162 @@ def analisar(referencia: str, request: Request):
         ),
         "fonte": FONTE,
         "as_of": today.isoformat(),
+    }
+
+
+# ============================ FASE 2 — conteúdo dos ficheiros ============================
+
+# Tipos de ficheiro que conseguimos enviar ao modelo com visão.
+_MEDIA = {
+    "pdf": "application/pdf", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+    "png": "image/png", "gif": "image/gif", "webp": "image/webp",
+}
+
+
+def _media_type(file_name: str | None) -> str | None:
+    ext = (file_name or "").rsplit(".", 1)[-1].lower() if "." in (file_name or "") else ""
+    return _MEDIA.get(ext)
+
+
+def _vision_sinais(doc_nome: str, proponente: str, file_name: str, media_type: str, b64: str) -> list[dict]:
+    """Lê UM ficheiro com o modelo de visão e devolve os sinais de conteúdo
+    fundamentados no catálogo. JSON estrito."""
+    if not settings.ANTHROPIC_API_KEY:
+        return []
+    system = (
+        "És um analista de prevenção de fraude documental de um intermediário de "
+        "crédito português (DS Crédito). Analisas UM ficheiro carregado num "
+        "processo de crédito e assinalas sinais de alerta de possível falsificação.\n\n"
+        "REGRA ABSOLUTA: a tua ÚNICA base de análise é o catálogo de sinais de "
+        "conteúdo a seguir (extraído dos manuais internos da DS). Não inventes "
+        "critérios fora do catálogo.\n\n"
+        + catalogo_conteudo_para_prompt() +
+        "\n\nINSTRUÇÕES:\n"
+        "- Analisa aritmética (somatórios de recibos/extratos), coerência de datas, "
+        "tipos de letra, campos obrigatórios (NIF/NIB/data), carimbos e assinaturas, "
+        "QR codes, descontos de Segurança Social, e incoerências internas.\n"
+        "- Só assinala o que EFETIVAMENTE observas no ficheiro. Se não há sinais, "
+        "devolve lista vazia. Não gerar falsos positivos.\n"
+        "- Responde APENAS com JSON válido, sem texto à volta:\n"
+        '{"sinais": [{"id": "<id do catálogo>", "categoria": "...", '
+        '"severidade": "alto|medio|baixo", "titulo": "...", "evidencia": "<o que viste, concreto>"}]}'
+    )
+    block = ({"type": "document", "source": {"type": "base64", "media_type": media_type, "data": b64}}
+             if media_type == "application/pdf"
+             else {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}})
+    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    resp = client.messages.create(
+        model=settings.ANALISE_VISION_MODEL,
+        max_tokens=1500,
+        temperature=0,
+        system=system,
+        messages=[{"role": "user", "content": [
+            block,
+            {"type": "text", "text":
+                f"Ficheiro: {file_name}\nTipo de documento: {doc_nome}\nProponente/objeto: {proponente}\n"
+                "Analisa este ficheiro e devolve os sinais de conteúdo em JSON."},
+        ]}],
+    )
+    text = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+    if text.startswith("```"):
+        text = text.split("```", 2)[1].lstrip("json").strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    valid_ids = {s["id"] for s in SINAIS_ALERTA}
+    out = []
+    for s in data.get("sinais", []):
+        if s.get("id") not in valid_ids:
+            continue  # regra absoluta: fora do catálogo, descarta
+        base = next((x for x in SINAIS_ALERTA if x["id"] == s["id"]), {})
+        out.append({
+            "id": s["id"], "categoria": s.get("categoria") or base.get("categoria"),
+            "severidade": s.get("severidade") or "baixo", "titulo": s.get("titulo"),
+            "evidencia": s.get("evidencia"), "verificacao": "confirmado_ficheiro",
+            "base_manual": base.get("descricao"),
+            "ficheiro": file_name, "documento": doc_nome, "proponente": proponente,
+        })
+    return out
+
+
+@router.post("/{referencia}/conteudo")
+def analisar_conteudo(referencia: str, request: Request):
+    """Fase 2 (a pedido): descarrega os ficheiros do processo e lê o conteúdo com
+    o modelo de visão, aplicando as regras de conteúdo do catálogo. Tem custo por
+    ficheiro — limitado por ANALISE_MAX_FICHEIROS e ANALISE_MAX_FILE_MB."""
+    row, acct = _resolve(referencia, request)
+    pid = row["crm_id"]
+
+    from integrations.ds_crm.client import CredidekClient
+    try:
+        client = CredidekClient(email=acct.crm_email, password=acct.crm_password)
+        lst = client.get_documents(pid)
+    except Exception as e:
+        raise HTTPException(502, f"Não foi possível ler o processo no CRM: {type(e).__name__}")
+
+    # nome legível do tipo de documento (do checklist) + proponente
+    checklist = (lst.get("documentsProponents") or []) + (lst.get("documentsRelated") or [])
+    tipo_nome = {c.get("documentId"): c.get("name") for c in checklist}
+    prop_nome = {}
+    for c in checklist:
+        pid_prop = c.get("creditProcessProponentId")
+        if pid_prop and c.get("groupName"):
+            prop_nome[pid_prop] = c["groupName"]
+
+    ficheiros = lst.get("documents") or []
+    limite = settings.ANALISE_MAX_FICHEIROS
+    max_bytes = int(settings.ANALISE_MAX_FILE_MB * 1024 * 1024)
+
+    analisados, ignorados, sinais = [], [], []
+    for f in ficheiros:
+        if len(analisados) >= limite:
+            ignorados.append({"ficheiro": f.get("fileName"), "motivo": f"limite de {limite} ficheiros atingido"})
+            continue
+        fname = f.get("fileName") or f"ficheiro-{f.get('id')}"
+        mt = _media_type(fname)
+        if not mt:
+            ignorados.append({"ficheiro": fname, "motivo": "formato não legível por visão (ex.: Office/zip)"})
+            continue
+        if (f.get("fileSize") or 0) > max_bytes:
+            ignorados.append({"ficheiro": fname, "motivo": f"ficheiro > {settings.ANALISE_MAX_FILE_MB:g} MB"})
+            continue
+        try:
+            file_obj = client.get_file(f["id"])
+            b64 = (file_obj or {}).get("filebase64")
+            if not b64:
+                ignorados.append({"ficheiro": fname, "motivo": "sem conteúdo devolvido pelo CRM"})
+                continue
+            # confirma tamanho real (base64 -> bytes) por segurança
+            if len(b64) * 3 // 4 > max_bytes:
+                ignorados.append({"ficheiro": fname, "motivo": f"ficheiro > {settings.ANALISE_MAX_FILE_MB:g} MB"})
+                continue
+            doc_nome = tipo_nome.get(f.get("documentId")) or "Documento"
+            proponente = prop_nome.get(f.get("creditProcessProponentId")) or (row.get("customer_name") or "—")
+            fsinais = _vision_sinais(doc_nome, proponente, fname, mt, b64)
+        except Exception as e:
+            ignorados.append({"ficheiro": fname, "motivo": f"erro na análise ({type(e).__name__})"})
+            continue
+        analisados.append({"ficheiro": fname, "documento": doc_nome,
+                           "proponente": proponente, "n_sinais": len(fsinais)})
+        sinais.extend(fsinais)
+
+    ordem = {"alto": 0, "medio": 1, "baixo": 2}
+    sinais.sort(key=lambda s: ordem.get(s.get("severidade"), 3))
+
+    return {
+        "referencia": row["reference"],
+        "ambito": scope_label(request),
+        "conta_crm": acct.username,
+        "total_ficheiros": len(ficheiros),
+        "ficheiros_analisados": analisados,
+        "ficheiros_ignorados": ignorados,
+        "sinais_alerta": sinais,
+        "nota_metodologia": (
+            "Análise de conteúdo (Fase 2): cada ficheiro legível foi descarregado do "
+            "CRM e lido com um modelo de visão, aplicando as regras de conteúdo do "
+            "catálogo dos manuais internos. Sinais confirmados na leitura do ficheiro."
+        ),
+        "fonte": FONTE,
+        "as_of": datetime.now(timezone.utc).date().isoformat(),
     }

@@ -157,6 +157,18 @@ class CredidekClient:
     def get_documents(self, pid: int) -> dict:
         return self._get(f"/creditprocesses/documents/list/{pid}")
 
+    def list_uploaded_files(self, pid: int) -> list[dict]:
+        """Ficheiros REALMENTE carregados no processo (chave `documents` da lista,
+        distinta de `documentsProponents` que é só o checklist). Cada item tem
+        `id` (chave de download), fileName, fileSize, documentId, validated e o
+        proponente/imóvel a que pertence."""
+        return self.get_documents(pid).get("documents") or []
+
+    def get_file(self, file_id: int) -> dict | None:
+        """Descarrega um ficheiro por id → dict com `filebase64` e `fileName`."""
+        arr = self._get(f"/creditprocesses/documents/{file_id}").get("creditprocessesdocuments") or []
+        return arr[0] if arr else None
+
     def list_processos_page(self, page: int = 1, page_size: int = 50, *, archived: bool = True) -> dict:
         # Body mirrors the SPA's request (captured 22 Jul 2026 on pd/Loulé).
         # CRITICAL: filterAgencyId/filterCompanyId must be null, not 0 — with 0

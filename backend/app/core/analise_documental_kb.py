@@ -132,6 +132,17 @@ METODO = (
 )
 
 
+def catalogo_conteudo_para_prompt() -> str:
+    """Só os sinais de CONTEÚDO (Fase 2), para aplicar à leitura do ficheiro."""
+    linhas = ["CATÁLOGO DE SINAIS DE ALERTA DE CONTEÚDO (única base de análise permitida):"]
+    for s in SINAIS_ALERTA:
+        if s["tipo"] == "conteudo":
+            linhas.append(f"- ({s['id']}, {s['categoria']}) {s['descricao']}")
+    linhas.append(f"\nFONTES EXTERNAS DE VERIFICAÇÃO (para recomendação):")
+    linhas += [f"- {f}" for f in FONTES_EXTERNAS]
+    return "\n".join(linhas)
+
+
 def catalogo_para_prompt() -> str:
     """Serializa o catálogo para injetar no prompt do modelo."""
     linhas = [f"ENQUADRAMENTO JURÍDICO:\n{ENQUADRAMENTO_JURIDICO}\n",
