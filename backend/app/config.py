@@ -36,6 +36,9 @@ class Settings:
     COOKIE_SECURE: bool = os.environ.get("COOKIE_SECURE", "true").strip().lower() != "false"
 
     ENVIRONMENT: str = os.environ.get("ENVIRONMENT", "development")
+    # Postgres/PostgREST schema desta instância no projeto Supabase partilhado
+    # ("ds" = Ramada; "dsl" = Loulé). Cada loja vive isolada no seu schema.
+    DB_SCHEMA: str = os.environ.get("DB_SCHEMA", "ds")
     LOJA_NAME: str = os.environ.get("LOJA_NAME", "DS Crédito Ramada – Jardim da Amoreira")
     # Short form for headers/prompts (no location suffix). Defaults to LOJA_NAME
     # truncated at the " – " separator (e.g. "DS Crédito Ramada").
