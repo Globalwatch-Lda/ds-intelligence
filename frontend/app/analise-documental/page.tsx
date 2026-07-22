@@ -123,13 +123,6 @@ export default function AnaliseDocumentalPage() {
     <div className="space-y-8">
       <header>
         <h1 className="text-2xl font-semibold text-ink-900">Análise documental</h1>
-        <p className="text-ink-400 mt-1">
-          Deteção de sinais de alerta de falsificação num processo de crédito. A base de
-          análise são os manuais internos de deteção de documentos falsificados da DS. A
-          análise (Fase 1) cruza os dados estruturados do processo no CRM — proponentes e
-          checklist de documentos — com o catálogo de sinais de alerta; não abre o
-          conteúdo dos ficheiros.
-        </p>
       </header>
 
       <section className="card">
@@ -218,7 +211,7 @@ export default function AnaliseDocumentalPage() {
               A verificar no documento <span className="text-ink-400">({aVerificar.length})</span>
             </h2>
             <p className="text-sm text-ink-400 mb-3">
-              Sinais que exigem inspeção manual do conteúdo do ficheiro (Fase 1 não abre ficheiros).
+              Sinais que exigem inspeção manual do conteúdo do ficheiro.
             </p>
             {aVerificar.length === 0 ? (
               <p className="text-sm text-ink-600">Sem recomendações de inspeção adicionais.</p>
@@ -239,7 +232,7 @@ export default function AnaliseDocumentalPage() {
                 <p className="text-sm text-ink-400 mt-1 max-w-2xl">
                   Descarrega os ficheiros do processo e lê o conteúdo (recibos, extratos, IRS,
                   cartas patronais) para detetar somatórios errados, tipos de letra, recibos
-                  repetidos, QR/NIF e outras red-flags do manual. Tem custo por ficheiro.
+                  repetidos, QR/NIF e outras red-flags do manual.
                 </p>
               </div>
               <button className="btn-primary shrink-0" onClick={analisarConteudo} disabled={loadingConteudo}>
