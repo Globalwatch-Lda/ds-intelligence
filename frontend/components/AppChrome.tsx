@@ -25,6 +25,7 @@ const PAGE_CAP: Record<string, string> = {
   '/leads': 'page.leads',
   '/newsletter': 'page.newsletter',
   '/recap': 'page.recap',
+  '/analise-documental': 'page.analise_documental',
   '/clientes-live': 'page.crm_live',
   '/whatsapp': 'messaging.send',
 };
@@ -60,6 +61,7 @@ const config: SynertiaConfig = {
     { href: '/newsletter', label: 'Newsletter', icon: <IconNewsletter /> },
     { href: '/whatsapp', label: 'WhatsApp', icon: IconWhatsApp },
     { href: '/recap', label: 'Recap semanal', icon: <IconReport /> },
+    { href: '/analise-documental', label: 'Análise documental', icon: <IconReport /> },
   ],
   liveLink: { href: '/clientes-live', label: 'CRM em direto' },
   fullWidthRoutes: ['/dashboard'],

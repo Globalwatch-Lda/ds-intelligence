@@ -23,6 +23,7 @@ CAPABILITIES: dict[str, tuple[str, str]] = {
     "page.leads":         ("Páginas", "Leads"),
     "page.newsletter":    ("Páginas", "Newsletter"),
     "page.recap":         ("Páginas", "Recap semanal"),
+    "page.analise_documental": ("Páginas", "Análise documental"),
     "page.crm_live":      ("Páginas", "CRM em direto"),
     "page.configuracoes": ("Páginas", "Configurações"),
     # ---- Ações ----
@@ -43,6 +44,7 @@ PAGE_CAPABILITY: dict[str, str] = {
     "/leads":          "page.leads",
     "/newsletter":     "page.newsletter",
     "/recap":          "page.recap",
+    "/analise-documental": "page.analise_documental",
     "/clientes-live":  "page.crm_live",
     "/configuracoes":  "page.configuracoes",
 }

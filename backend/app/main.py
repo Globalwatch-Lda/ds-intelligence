@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .config import settings
-from .routers import dashboard, triggers, newsletter, chat, whatsapp, leads, broadcasts, crm_live, recap, auth, perfis, equipas, public, settings as settings_router
+from .routers import dashboard, triggers, newsletter, chat, whatsapp, leads, broadcasts, crm_live, recap, analise_documental, auth, perfis, equipas, public, settings as settings_router
 from .routers.auth import COOKIE_NAME, valid_token
 from .multicanal_ctx import build_ctx
 from synertia_multicanal import create_router as multicanal_router
@@ -87,6 +87,7 @@ app.include_router(leads.router, prefix="/api/leads", tags=["leads"])
 app.include_router(broadcasts.router, prefix="/api/broadcasts", tags=["broadcasts"])
 app.include_router(crm_live.router, prefix="/api/crm-live", tags=["crm-live"])
 app.include_router(recap.router, prefix="/api/recap", tags=["recap"])
+app.include_router(analise_documental.router, prefix="/api/analise-documental", tags=["analise-documental"])
 app.include_router(perfis.router, prefix="/api/perfis", tags=["perfis"])
 app.include_router(equipas.router, prefix="/api/equipas", tags=["equipas"])
 # Comunicação Multicanal — servida pelo módulo empacotado `synertia-multicanal`

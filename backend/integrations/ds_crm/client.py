@@ -147,6 +147,16 @@ class CredidekClient:
             self.list_customers_page, page_size=page_size, data_key="data",
         )
 
+    # ---- single-process reads (used by Análise Documental) ------------------
+    def get_processo(self, pid: int) -> dict:
+        return self._get(f"/creditprocesses/{pid}")
+
+    def get_proponents(self, pid: int) -> dict:
+        return self._get(f"/creditprocesses/proponents/{pid}")
+
+    def get_documents(self, pid: int) -> dict:
+        return self._get(f"/creditprocesses/documents/list/{pid}")
+
     def list_processos_page(self, page: int = 1, page_size: int = 50, *, archived: bool = True) -> dict:
         # Body mirrors the SPA's request (captured 22 Jul 2026 on pd/Loulé).
         # CRITICAL: filterAgencyId/filterCompanyId must be null, not 0 — with 0

@@ -1,0 +1,145 @@
+"""Base de conhecimento para a Análise Documental — catálogo de sinais de alerta
+de falsificação de documentos.
+
+FONTE (validada com o cliente): os dois manuais da DS Crédito na pasta `verifica/`:
+  1. "Manual de Procedimentos de Deteção de Documentos Falsificados" (V1/Fevereiro 2024)
+  2. "Formação — Falsificação de Documentos / DSIC" (DRG, 14-08-2024)
+
+Este catálogo é a ÚNICA base de análise: o motor de Análise Documental só assinala
+sinais de alerta previstos aqui. Cada sinal indica se é confirmável com os dados
+estruturados do CRM (`estrutural`) ou se exige inspeção do conteúdo do ficheiro
+(`conteudo`) — estes últimos são apresentados como "a verificar no documento",
+nunca afirmados, porque a Fase 1 não descarrega os ficheiros.
+
+Ao atualizar os manuais em verifica/, reveja este catálogo em conformidade.
+"""
+from __future__ import annotations
+
+FONTE = (
+    "Manual de Procedimentos de Deteção de Documentos Falsificados (V1/Fev-2024) "
+    "e Formação Falsificação de Documentos DSIC (DRG, 14-08-2024) — pasta verifica/"
+)
+
+ENQUADRAMENTO_JURIDICO = (
+    "A falsificação de documentos é crime público (art.º 256.º do Código Penal), "
+    "punível com pena de prisão até 3 anos ou multa; a tentativa é punível. "
+    "Enquanto intermediário de crédito, a DS deve fazer o controlo de 1.º nível: "
+    "análise cuidada dos documentos antes de os apresentar à instituição financeira, "
+    "e verificação da veracidade em caso de suspeita. A presença de sinais de alerta "
+    "NÃO significa fraude — significa que a situação deve ser verificada e monitorizada "
+    "com diligência antes da submissão ao banco."
+)
+
+# Cada sinal: id, categoria, descrição (do manual), tipo de verificação.
+#   tipo = "estrutural"  -> confirmável com dados estruturados do CRM
+#   tipo = "conteudo"    -> exige inspeção do conteúdo do ficheiro (Fase 2)
+SINAIS_ALERTA: list[dict] = [
+    # ---- Formato dos documentos (Manual, secção 1) ----
+    {"id": "fmt_logotipo", "categoria": "Formato",
+     "descricao": "Faturas, cartas ou documentos empresariais sem o logótipo da empresa.",
+     "tipo": "conteudo"},
+    {"id": "fmt_tipo_letra", "categoria": "Formato",
+     "descricao": "Diferenças visíveis no tipo, dimensão, nitidez ou cor do tipo de letra dentro do mesmo documento (ex.: NIB com letra diferente do resto do recibo).",
+     "tipo": "conteudo"},
+    {"id": "fmt_numeros_manuscritos", "categoria": "Formato",
+     "descricao": "Números apagados ou eliminados e montantes manuscritos.",
+     "tipo": "conteudo"},
+    {"id": "fmt_carimbos", "categoria": "Formato",
+     "descricao": "Limites anormalmente bem definidos de carimbos oficiais ou cores não usuais (indício de impressora).",
+     "tipo": "conteudo"},
+    {"id": "fmt_assinaturas_identicas", "categoria": "Formato",
+     "descricao": "Assinaturas totalmente idênticas (forma e dimensão) em vários documentos — possível falsificação gerada em computador.",
+     "tipo": "conteudo"},
+
+    # ---- Conteúdo dos documentos (Manual, secção 2) ----
+    {"id": "cont_erro_calculo", "categoria": "Conteúdo",
+     "descricao": "Erro(s) de cálculo numa fatura, recibo ou extrato: totais não coincidentes com a soma das transações (ex.: Start Balance + Money In − Money Out ≠ End Balance; Total Payments ≈ Net Pay ignorando Deductions).",
+     "tipo": "conteudo"},
+    {"id": "cont_elemento_obrigatorio", "categoria": "Conteúdo",
+     "descricao": "Ausência de elemento obrigatório numa fatura/recibo: data, NIF, número da fatura, NIB, departamento.",
+     "tipo": "conteudo"},
+    {"id": "cont_nib_incoerente", "categoria": "Conteúdo",
+     "descricao": "Incoerências no NIB/IBAN: menos dígitos do que o habitual, banco a pagar diferente do banco do NIB, transferência de vencimento a débito e não a crédito.",
+     "tipo": "conteudo"},
+    {"id": "cont_datas_nao_usuais", "categoria": "Conteúdo",
+     "descricao": "Datas, montantes, observações, números de telefone ou cálculos não usuais; período do extrato incoerente com a data de emissão.",
+     "tipo": "conteudo"},
+    {"id": "cont_recibos_repetidos", "categoria": "Conteúdo",
+     "descricao": "Recibos sempre iguais mudando apenas o mês; extratos com o mesmo número de movimentos em meses diferentes.",
+     "tipo": "conteudo"},
+    {"id": "cont_qr_nif", "categoria": "Conteúdo",
+     "descricao": "QR code de fatura aponta para NIF diferente do apresentado no rosto da fatura.",
+     "tipo": "conteudo"},
+
+    # ---- Padrões PT residentes (Formação) ----
+    {"id": "pt_vencimento_empolado", "categoria": "Padrão PT",
+     "descricao": "Vencimentos empolados para o tipo de profissão, ou empolados via ajudas de custo/subsídios; aumento significativo do vencimento face ao IRS do ano anterior.",
+     "tipo": "estrutural"},
+    {"id": "pt_irs_fora_prazo", "categoria": "Padrão PT",
+     "descricao": "Declaração de IRS entregue fora de prazo e normalmente sem IBAN carregado para reembolso.",
+     "tipo": "conteudo"},
+    {"id": "pt_sem_descontos_ss", "categoria": "Padrão PT",
+     "descricao": "Recibo sem descontos para a Segurança Social, ou descontos apenas sobre o vencimento base; IRS sem contribuições para a SS quando declara rendimento mensal relevante.",
+     "tipo": "conteudo"},
+    {"id": "pt_idade_inicio_trabalho", "categoria": "Padrão PT",
+     "descricao": "Início de atividade profissional em idade implausível (ex.: começou a trabalhar aos 14 anos): comparar data de nascimento com data de início na empresa/antiguidade.",
+     "tipo": "estrutural"},
+    {"id": "pt_cliente_recente", "categoria": "Padrão PT",
+     "descricao": "Cliente recente no banco com movimentos que só demonstram o crédito do ordenado e poucos débitos, provocando saldos crescentes mês a mês.",
+     "tipo": "conteudo"},
+
+    # ---- Padrões UK emigrantes (Formação) ----
+    {"id": "uk_profissao_rendimento", "categoria": "Padrão UK",
+     "descricao": "Emigrante no Reino Unido (frequentemente com ascendência PALOP) com profissão 'de prestígio' (consultor, engenheiro, enfermeiro, IT) e rendimentos elevados, com extratos de bons saldos e poucos débitos.",
+     "tipo": "estrutural"},
+    {"id": "uk_credit_report", "categoria": "Padrão UK",
+     "descricao": "Incoerências no Credit Report: saldos históricos a 0 ou campos em branco; conta aberta quando o cliente era menor; data de update posterior à data do relatório; saldos do report não coincidem com os extratos.",
+     "tipo": "conteudo"},
+    {"id": "uk_declaracao_patronal", "categoria": "Padrão UK",
+     "descricao": "Declarações de entidade patronal idênticas entre clientes com empregadores diferentes; cartas com tipos de letra do MSWord e erros de escrita; pedidos com origem no mesmo parceiro.",
+     "tipo": "conteudo"},
+    {"id": "uk_payslip_p60", "categoria": "Padrão UK",
+     "descricao": "Payslip com erro no somatório; deductions não refletidas no Net Pay; P60 com dados editados; recibo sem número de empregado; valor a crédito não corresponde à entidade patronal.",
+     "tipo": "conteudo"},
+
+    # ---- Outros sinais (Manual, secção 3) ----
+    {"id": "outros_atraso_info", "categoria": "Outros",
+     "descricao": "Atrasos não usuais no fornecimento de informação ou recusa em apresentar os documentos originais quando solicitados.",
+     "tipo": "estrutural"},
+    {"id": "outros_incoerencias", "categoria": "Outros",
+     "descricao": "Incoerências entre as informações apresentadas nos vários documentos; dados que diferem visualmente de um documento semelhante do mesmo organismo.",
+     "tipo": "conteudo"},
+    {"id": "outros_documento_expirado", "categoria": "Outros",
+     "descricao": "Documento de identificação ou certidão fora de validade.",
+     "tipo": "estrutural"},
+]
+
+# Verificação em fontes externas (Manual/Formação — "Em caso de dúvida").
+FONTES_EXTERNAS: list[str] = [
+    "Certificados de contribuições fiscais/sociais: confirmar autenticidade junto da AT ou da Segurança Social (Segurança Social Direta).",
+    "Extratos bancários: verificar coerência entre saldo, vencimento mensal e volume de negócios/capital declarados.",
+    "Balanços: controlo cruzado com bases de dados de fonte aberta sobre volume de negócios e capital.",
+    "IRS: solicitar comprovativos de entrega de anos anteriores; confirmar no Portal das Finanças.",
+    "Situação laboral: confirmar junto da entidade empregadora.",
+    "UK: Home Office share code (immigration status), HMRC personal account, Full Credit Report (Experian/checkmyfile). O P60 é facilmente editável.",
+]
+
+METODO = (
+    "O melhor método é comparar a suspeita com a realidade: prestar atenção a "
+    "logótipos, assinaturas, datas e carimbos, e cruzar a informação entre "
+    "documentos. Confirmado o risco, o contacto imediato com as autoridades "
+    "policiais é pertinente, recolhendo o máximo de informação sobre o infrator."
+)
+
+
+def catalogo_para_prompt() -> str:
+    """Serializa o catálogo para injetar no prompt do modelo."""
+    linhas = [f"ENQUADRAMENTO JURÍDICO:\n{ENQUADRAMENTO_JURIDICO}\n",
+              "CATÁLOGO DE SINAIS DE ALERTA (única base de análise permitida):"]
+    for s in SINAIS_ALERTA:
+        marca = "[estrutural]" if s["tipo"] == "estrutural" else "[conteúdo — a verificar no ficheiro]"
+        linhas.append(f"- ({s['id']}, {s['categoria']}) {marca} {s['descricao']}")
+    linhas.append("\nFONTES EXTERNAS DE VERIFICAÇÃO:")
+    linhas += [f"- {f}" for f in FONTES_EXTERNAS]
+    linhas.append(f"\nMÉTODO DE DETEÇÃO:\n{METODO}")
+    return "\n".join(linhas)
