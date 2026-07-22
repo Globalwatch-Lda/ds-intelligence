@@ -148,6 +148,10 @@ class CredidekClient:
         )
 
     def list_processos_page(self, page: int = 1, page_size: int = 50, *, archived: bool = True) -> dict:
+        # Body mirrors the SPA's request (captured 22 Jul 2026 on pd/Loulé).
+        # CRITICAL: filterAgencyId/filterCompanyId must be null, not 0 — with 0
+        # the API silently narrows the list to the JWT user's own processos
+        # (pd: 9 vs 744; bs: 197 vs 860). null = everything the account can see.
         body = {
             "startDate": None, "endDate": None, "stateId": 0, "typeId": 0,
             "customerId": 0, "reference": "", "nameCustomer": "",
@@ -155,10 +159,15 @@ class CredidekClient:
             "notificationsNotTreated": 0, "documentsNotUploaded": 0,
             "creditEntityId": 0, "creditEntityAgencyId": 0,
             "creditEntityAgencyContactId": 0, "archived": archived,
-            "filterAgencyId": 0, "filterCompanyId": 0,
+            "filterAgencyId": None, "filterCompanyId": None,
+            "isCreditCard": False, "taxNumber": 0, "labelId": 0,
             "dateType": 0, "nDays": 0,
             "pageNumber": page, "pageNResults": page_size,
             "orderBy": "", "ordering": 1,
+            "search": {
+                "leadOriginId": 0, "leadCampaignId": 0,
+                "kanbanStageId": 0, "kanbanId": 0, "noScheduledTasks": None,
+            },
         }
         return self._post("/creditprocesses/list", body)
 
