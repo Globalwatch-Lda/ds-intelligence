@@ -28,9 +28,13 @@ def configured() -> bool:
 
 
 def instance_name_for(username: str) -> str:
-    """Deterministic instance name for a user (namespaced, safe chars)."""
+    """Deterministic instance name for a user (namespaced, safe chars).
+
+    The prefix (EVOLUTION_INSTANCE_PREFIX) namespaces this deployment on the
+    shared Evolution server — each loja MUST use a distinct prefix.
+    """
     safe = re.sub(r"[^a-zA-Z0-9_]+", "_", (username or "").strip()).strip("_").lower()
-    return f"ds_{safe or 'user'}"
+    return f"{settings.EVOLUTION_INSTANCE_PREFIX}{safe or 'user'}"
 
 
 def _request(method: str, path: str, body: dict | None = None) -> dict:

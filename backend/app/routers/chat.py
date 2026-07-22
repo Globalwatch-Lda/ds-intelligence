@@ -27,7 +27,7 @@ router = APIRouter()
 
 
 SYSTEM_PROMPT = """You are Ana, the operational assistant inside DS Matrix at the
-DS Crédito Ramada – Jardim da Amoreira loja. Sílvia and her gestores ask you
+__LOJA__ loja. The loja team asks you
 natural-language questions about their clients, processes, and policies. You answer
 from the JSON snapshot of the CRM provided in the user message.
 
@@ -90,7 +90,7 @@ RULES:
   that over reaching into the demo apolices/leads.
 - When the operator asks "envia uma mensagem", DO NOT pretend to send. Tell them to
   use the Gatilhos panel.
-- Keep replies under 200 words unless explicitly asked for more detail."""
+- Keep replies under 200 words unless explicitly asked for more detail.""".replace("__LOJA__", settings.LOJA_NAME)
 
 
 def _select_all(sb, table: str, columns: str, page_size: int = 1000, *, scope: dict | None = None) -> list[dict]:

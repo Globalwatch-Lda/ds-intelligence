@@ -15,6 +15,7 @@ import ChatDock from './ChatDock';
 import UserFooter from './UserFooter';
 import { AboutDialog } from './AboutDialog';
 import { useMe } from '../lib/useMe';
+import { LOJA_NAME } from '../lib/loja';
 
 // Which capability each nav destination requires (mirrors the backend catalog in
 // backend/app/core/capabilities.py). A route with no entry here is always shown.
@@ -50,7 +51,7 @@ const config: SynertiaConfig = {
   brandMarkSrc: '/logo-synertia-icon.png',
   clientLogoSrc: '/ds-logo.svg',
   productName: 'DS Matrix',
-  clientName: 'DS Crédito Ramada',
+  clientName: LOJA_NAME,
   accent: '#a91b60',
   nav: [
     { href: '/contactos', label: 'Contactos', icon: <IconContacts /> },

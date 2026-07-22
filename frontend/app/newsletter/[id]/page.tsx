@@ -1,4 +1,5 @@
 import { headers } from 'next/headers';
+import { LOJA_NAME, LOJA_NAME_FULL } from '../../../lib/loja';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,7 +55,7 @@ export default async function NewsletterDetail({ params }: { params: Promise<{ i
     return (
       <article className="max-w-2xl mx-auto py-12 px-4 text-center">
         <h1 className="text-xl font-semibold text-ink-900">Newsletter não encontrada</h1>
-        <p className="text-ink-400 mt-2">Verifique o link ou contacte a equipa DS Crédito Ramada.</p>
+        <p className="text-ink-400 mt-2">Verifique o link ou contacte a equipa {LOJA_NAME}.</p>
       </article>
     );
   }
@@ -64,7 +65,7 @@ export default async function NewsletterDetail({ params }: { params: Promise<{ i
       <div dangerouslySetInnerHTML={{ __html: mdToHtml(nl.conteudo_md || '') }} />
       <hr className="my-6 border-ink-100" />
       <p className="text-xs text-ink-400">
-        Newsletter da DS Crédito Ramada – Jardim da Amoreira. Gerada em {new Date(nl.created_at).toLocaleDateString('pt-PT')}.
+        Newsletter da {LOJA_NAME_FULL}. Gerada em {new Date(nl.created_at).toLocaleDateString('pt-PT')}.
       </p>
     </article>
   );

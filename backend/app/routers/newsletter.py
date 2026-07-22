@@ -60,7 +60,7 @@ def _require_author(request: Request) -> None:
         raise HTTPException(403, "Sem permissão para criar ou enviar newsletters.")
 
 
-SYSTEM_PROMPT = """You are the editorial writer for DS Crédito Ramada, a Portuguese credit and
+SYSTEM_PROMPT = """You are the editorial writer for __LOJA__, a Portuguese credit and
 insurance brokerage. Your job is to produce short, friendly, accurate financial-literacy
 newsletters that build trust with retail clients.
 
@@ -76,7 +76,7 @@ OUTPUT RULES (non-negotiable):
 - Do NOT fabricate statistics, regulatory changes, or news events. Stay evergreen unless the
   user gives you a specific datapoint.
 
-You will receive a `tema` (theme) from the user. Produce the newsletter and nothing else."""
+You will receive a `tema` (theme) from the user. Produce the newsletter and nothing else.""".replace("__LOJA__", settings.LOJA_SHORT_NAME)
 
 
 class GenerateBody(BaseModel):
@@ -177,7 +177,7 @@ def get_newsletter(newsletter_id: str):
     return rows[0]
 
 
-REFORMAT_SYSTEM = """You are the editorial assistant for DS Crédito Ramada – Jardim da Amoreira.
+REFORMAT_SYSTEM = """You are the editorial assistant for __LOJA__.
 The operator has uploaded a draft document. Your job is to reformat the operator's
 content into the DS newsletter house style — same constraints as a fresh newsletter:
 
@@ -189,7 +189,7 @@ content into the DS newsletter house style — same constraints as a fresh newsl
 - PRESERVE the operator's intended message, key facts, and named numbers. Do NOT add new factual claims.
 - If the source is too short to fill one page, keep it short rather than padding.
 
-Output the markdown and nothing else."""
+Output the markdown and nothing else.""".replace("__LOJA__", settings.LOJA_NAME)
 
 
 class ReformatBody(BaseModel):

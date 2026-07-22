@@ -37,6 +37,9 @@ class Settings:
 
     ENVIRONMENT: str = os.environ.get("ENVIRONMENT", "development")
     LOJA_NAME: str = os.environ.get("LOJA_NAME", "DS Crédito Ramada – Jardim da Amoreira")
+    # Short form for headers/prompts (no location suffix). Defaults to LOJA_NAME
+    # truncated at the " – " separator (e.g. "DS Crédito Ramada").
+    LOJA_SHORT_NAME: str = os.environ.get("LOJA_SHORT_NAME", "") or LOJA_NAME.split(" – ")[0]
     BRAND_RED: str = os.environ.get("BRAND_RED", "#E30613")
 
     # Public base URL of the frontend (used to build links inside emails, e.g. the
@@ -63,6 +66,10 @@ class Settings:
     EVOLUTION_API_URL: str = os.environ.get("EVOLUTION_API_URL", "")
     EVOLUTION_API_KEY: str = os.environ.get("EVOLUTION_API_KEY", "")
     EVOLUTION_INSTANCE: str = os.environ.get("EVOLUTION_INSTANCE", "")
+    # Namespace prefix for per-user instance names on the SHARED Evolution server.
+    # Must be unique per loja/deployment (e.g. "ds_" Ramada, "dsl_" Loulé) so two
+    # instâncias never collide on the same Evolution box.
+    EVOLUTION_INSTANCE_PREFIX: str = os.environ.get("EVOLUTION_INSTANCE_PREFIX", "ds_")
 
     CHAT_MODEL: str = "claude-sonnet-4-6"
     NEWSLETTER_MODEL: str = "claude-sonnet-4-6"

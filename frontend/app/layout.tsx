@@ -2,6 +2,7 @@ import './globals.css';
 import type { Metadata, Viewport } from 'next';
 import { Montserrat } from 'next/font/google';
 import AppChrome from '../components/AppChrome';
+import { LOJA_NAME } from '../lib/loja';
 
 // Synertia brand typeface.
 const montserrat = Montserrat({
@@ -12,7 +13,7 @@ const montserrat = Montserrat({
 });
 
 export const metadata: Metadata = {
-  title: 'DS Matrix — DS Crédito Ramada',
+  title: `DS Matrix — ${LOJA_NAME}`,
   description: 'Plataforma de Inteligência Comercial para DS Crédito + DS Seguros',
 };
 
