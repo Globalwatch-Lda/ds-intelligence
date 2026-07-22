@@ -12,6 +12,7 @@ const CARDS = [
   { href: '/leads', title: 'Leads', desc: 'Captação e reativação', color: '#3b6cf0', icon: <IconLeads className="h-9 w-9" /> },
   { href: '/newsletter', title: 'Newsletter', desc: 'Comunicação aos clientes', color: '#14b8a6', icon: <IconNewsletter className="h-9 w-9" /> },
   { href: '/recap', title: 'Recap semanal', desc: 'Resumo para coordenadores', color: '#6366f1', icon: <IconReport className="h-9 w-9" /> },
+  { href: '/analise-documental', title: 'Análise documental', desc: 'Deteção de sinais de fraude', color: '#a91b60', icon: <IconReport className="h-9 w-9" /> },
 ];
 
 export default function Welcome() {
