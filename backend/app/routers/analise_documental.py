@@ -322,11 +322,13 @@ def _media_type(file_name: str | None) -> str | None:
 
 
 def _vision_sinais(doc_nome: str, proponente: str, file_name: str, media_type: str, b64: str,
-                   contexto: str = "") -> list[dict]:
-    """Lê UM ficheiro com o modelo de visão e devolve os sinais de conteúdo
-    fundamentados no catálogo. JSON estrito."""
+                   contexto: str = "") -> tuple[list[dict], dict]:
+    """Lê UM ficheiro com o modelo de visão e devolve (sinais, factos):
+    - sinais: alertas de conteúdo fundamentados no catálogo (JSON estrito);
+    - factos: resumo estruturado do ficheiro (entidade, período, valores, datas,
+      NIB…) para a passagem final de cruzamento entre documentos."""
     if not settings.ANTHROPIC_API_KEY:
-        return []
+        return [], {}
     hoje = datetime.now(timezone.utc).date().isoformat()
     system = (
         "És um analista de prevenção de fraude documental de um intermediário de "
@@ -353,9 +355,19 @@ def _vision_sinais(doc_nome: str, proponente: str, file_name: str, media_type: s
         "homogénea da página (texto nítido sobre fundo esbatido = indício de montagem).\n"
         "- Só assinala o que EFETIVAMENTE observas no ficheiro. Se não há sinais, "
         "devolve lista vazia. Não gerar falsos positivos.\n"
+        "- Extrai também os FACTOS-CHAVE do documento (para cruzamento posterior "
+        "entre documentos): não é um alerta, é o que o documento diz. Preenche só o "
+        "que existir; usa null quando não aplicável.\n"
         "- Responde APENAS com JSON válido, sem texto à volta:\n"
         '{"sinais": [{"id": "<id do catálogo>", "categoria": "...", '
-        '"severidade": "alto|medio|baixo", "titulo": "...", "evidencia": "<o que viste, concreto>"}]}'
+        '"severidade": "alto|medio|baixo", "titulo": "...", "evidencia": "<o que viste, concreto>"}], '
+        '"factos": {"tipo": "<recibo|extrato|irs|declaracao|contrato|id|outro>", '
+        '"entidade": "<empregador/banco/emissor>", "titular": "<nome no documento>", '
+        '"periodo": "<mês/ano ou intervalo a que respeita>", "data_emissao": "<dd-mm-aaaa ou null>", '
+        '"bruto": <valor ou null>, "liquido": <valor ou null>, "iht": <valor ou null>, '
+        '"desconto_ss": <valor ou null>, "retencao_irs": <valor ou null>, '
+        '"nib": "<IBAN/NIB ou null>", "anual_bruto": <valor ou null>, '
+        '"observacoes": "<uma frase com o que for relevante para cruzar com outros documentos>"}}'
     )
     block = ({"type": "document", "source": {"type": "base64", "media_type": media_type, "data": b64}}
              if media_type == "application/pdf"
@@ -380,7 +392,7 @@ def _vision_sinais(doc_nome: str, proponente: str, file_name: str, media_type: s
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        return []
+        return [], {}
     valid_ids = {s["id"] for s in SINAIS_ALERTA}
     out = []
     for s in data.get("sinais", []):
@@ -393,6 +405,77 @@ def _vision_sinais(doc_nome: str, proponente: str, file_name: str, media_type: s
             "evidencia": s.get("evidencia"), "verificacao": "confirmado_ficheiro",
             "base_manual": base.get("descricao"),
             "ficheiro": file_name, "documento": doc_nome, "proponente": proponente,
+        })
+    factos = data.get("factos") or {}
+    if isinstance(factos, dict):
+        factos = {**factos, "ficheiro": file_name, "documento": doc_nome, "proponente": proponente}
+    else:
+        factos = {}
+    return out, factos
+
+
+def _cruzamento_sinais(factos: list[dict], contexto: str) -> list[dict]:
+    """Passagem final: recebe os FACTOS extraídos de TODOS os ficheiros e procura
+    incoerências ENTRE documentos que uma leitura ficheiro-a-ficheiro não apanha
+    (ex.: recibo com IHT que não consta no total anual do IRS; declarações patronais
+    idênticas; NIB de vencimento diferente entre recibo e extrato; bruto mensal ×14
+    incompatível com o anual do IRS). Só devolve sinais do catálogo de conteúdo."""
+    if not settings.ANTHROPIC_API_KEY or len(factos) < 2:
+        return []
+    hoje = datetime.now(timezone.utc).date().isoformat()
+    system = (
+        "És um analista de prevenção de fraude documental da DS Crédito. Recebes os "
+        "FACTOS já extraídos de VÁRIOS documentos do MESMO processo de crédito e a tua "
+        "tarefa é encontrar INCOERÊNCIAS ENTRE documentos (não dentro de um só).\n\n"
+        "REGRA ABSOLUTA: a tua única base é o catálogo de sinais a seguir. Usa "
+        "sobretudo: outros_incoerencias (dados que diferem entre documentos), "
+        "pt_irs_vs_recibos (anual do IRS ≈ mensal ×14; complementos regulares como o "
+        "IHT têm de constar no anual), pt_iht_sem_incidencia, cont_nib_incoerente "
+        "(NIB de vencimento diferente entre documentos), cont_datas_nao_usuais, "
+        "uk_declaracao_patronal (declarações idênticas entre clientes/empregadores).\n\n"
+        + catalogo_conteudo_para_prompt() +
+        f"\n\nINSTRUÇÕES:\n- Data de hoje: {hoje}. Datas PT em dd-mm-aaaa. Documentos de "
+        "meses/anos anteriores são normais — antiguidade não é alerta.\n"
+        "- Compara valores com tolerância razoável (arredondamentos, 14 vs 12 meses, "
+        "subsídios). Só assinala quando a incoerência for material e sustentável.\n"
+        "- Cada sinal tem de citar concretamente os documentos e valores em conflito.\n"
+        "- Se os documentos forem coerentes entre si, devolve lista vazia.\n"
+        "- Responde APENAS com JSON válido:\n"
+        '{"sinais": [{"id": "<id do catálogo>", "categoria": "...", '
+        '"severidade": "alto|medio|baixo", "titulo": "...", '
+        '"evidencia": "<documentos e valores em conflito, concreto>"}]}'
+    )
+    payload = {"contexto_crm": contexto, "documentos": factos}
+    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    resp = client.messages.create(
+        model=settings.ANALISE_VISION_MODEL,
+        max_tokens=1500,
+        temperature=0,
+        system=system,
+        messages=[{"role": "user", "content":
+            "FACTOS extraídos dos documentos deste processo (JSON):\n"
+            + json.dumps(payload, ensure_ascii=False, default=str)
+            + "\n\nDevolve os sinais de incoerência entre documentos em JSON."}],
+    )
+    text = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+    if text.startswith("```"):
+        text = text.split("```", 2)[1].lstrip("json").strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    valid_ids = {s["id"] for s in SINAIS_ALERTA}
+    out = []
+    for s in data.get("sinais", []):
+        if s.get("id") not in valid_ids:
+            continue
+        base = next((x for x in SINAIS_ALERTA if x["id"] == s["id"]), {})
+        out.append({
+            "id": s["id"], "categoria": s.get("categoria") or base.get("categoria"),
+            "severidade": s.get("severidade") or "medio", "titulo": s.get("titulo"),
+            "evidencia": s.get("evidencia"), "verificacao": "cruzamento_documentos",
+            "base_manual": base.get("descricao"),
+            "ficheiro": "(cruzamento entre documentos)", "documento": "vários", "proponente": "—",
         })
     return out
 
@@ -465,24 +548,32 @@ def analisar_conteudo(referencia: str, request: Request):
             file_obj = client.get_file(f["id"])
             b64 = (file_obj or {}).get("filebase64")
             if not b64:
-                return None, {"ficheiro": fname, "motivo": "sem conteúdo devolvido pelo CRM"}, []
+                return None, {"ficheiro": fname, "motivo": "sem conteúdo devolvido pelo CRM"}, [], {}
             if len(b64) * 3 // 4 > max_bytes:
-                return None, {"ficheiro": fname, "motivo": f"ficheiro > {max_mb:g} MB"}, []
-            fsinais = _vision_sinais(doc_nome, proponente, fname, mt, b64, contexto)
+                return None, {"ficheiro": fname, "motivo": f"ficheiro > {max_mb:g} MB"}, [], {}
+            fsinais, ffactos = _vision_sinais(doc_nome, proponente, fname, mt, b64, contexto)
         except Exception as e:
-            return None, {"ficheiro": fname, "motivo": f"erro na análise ({type(e).__name__})"}, []
+            return None, {"ficheiro": fname, "motivo": f"erro na análise ({type(e).__name__})"}, [], {}
         return ({"ficheiro": fname, "documento": doc_nome, "proponente": proponente,
-                 "n_sinais": len(fsinais)}, None, fsinais)
+                 "n_sinais": len(fsinais)}, None, fsinais, ffactos)
 
-    analisados, sinais = [], []
+    analisados, sinais, factos_todos = [], [], []
     if candidatos:
         with ThreadPoolExecutor(max_workers=min(5, len(candidatos))) as ex:
-            for ok, ign, fsinais in ex.map(_processar, candidatos):
+            for ok, ign, fsinais, ffactos in ex.map(_processar, candidatos):
                 if ok:
                     analisados.append(ok)
                     sinais.extend(fsinais)
+                    if ffactos:
+                        factos_todos.append(ffactos)
                 if ign:
                     ignorados.append(ign)
+
+    # 3) passagem final de cruzamento entre documentos (só se houver ≥2 ficheiros lidos)
+    try:
+        sinais.extend(_cruzamento_sinais(factos_todos, contexto))
+    except Exception:
+        pass  # o cruzamento é um extra: nunca deve derrubar a Fase 2
 
     ordem = {"alto": 0, "medio": 1, "baixo": 2}
     sinais.sort(key=lambda s: ordem.get(s.get("severidade"), 3))
@@ -498,7 +589,10 @@ def analisar_conteudo(referencia: str, request: Request):
         "nota_metodologia": (
             "Análise de conteúdo (Fase 2): cada ficheiro legível foi descarregado do "
             "CRM e lido com um modelo de visão, aplicando as regras de conteúdo do "
-            "catálogo dos manuais internos. Sinais confirmados na leitura do ficheiro."
+            "catálogo dos manuais internos. Sinais confirmados na leitura do ficheiro. "
+            "Uma passagem final cruza os factos extraídos de todos os documentos para "
+            "apanhar incoerências entre eles (ex.: IHT nos recibos que não consta no "
+            "total anual do IRS) — sinais marcados como 'cruzamento entre documentos'."
         ),
         "fonte": FONTE,
         "as_of": datetime.now(timezone.utc).date().isoformat(),
