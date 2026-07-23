@@ -17,7 +17,8 @@ from __future__ import annotations
 
 FONTE = (
     "Manual de Procedimentos de Deteção de Documentos Falsificados (V1/Fev-2024) "
-    "e Formação Falsificação de Documentos DSIC (DRG, 14-08-2024) — pasta verifica/"
+    "e Formação Falsificação de Documentos DSIC (DRG, 14-08-2024) — pasta verifica/; "
+    "complementado com casos reais registados pelas lojas (Loulé, jul-2026)"
 )
 
 ENQUADRAMENTO_JURIDICO = (
@@ -49,6 +50,12 @@ SINAIS_ALERTA: list[dict] = [
      "tipo": "conteudo"},
     {"id": "fmt_assinaturas_identicas", "categoria": "Formato",
      "descricao": "Assinaturas totalmente idênticas (forma e dimensão) em vários documentos — possível falsificação gerada em computador.",
+     "tipo": "conteudo"},
+    {"id": "fmt_sem_assinatura", "categoria": "Formato",
+     "descricao": "Documento que exige assinatura apresentado sem assinatura e/ou carimbo (ex.: declaração de efetividade da entidade patronal por assinar; contrato sem rubricas).",
+     "tipo": "conteudo"},
+    {"id": "fmt_nitidez_heterogenea", "categoria": "Formato",
+     "descricao": "Nitidez heterogénea na mesma página: corpo do texto nítido sobre o resto esbatido ou de baixa resolução (logótipo, cabeçalho, rodapé, carimbo) — indício de texto sobreposto a uma digitalização.",
      "tipo": "conteudo"},
 
     # ---- Conteúdo dos documentos (Manual, secção 2) ----
@@ -86,6 +93,15 @@ SINAIS_ALERTA: list[dict] = [
      "tipo": "estrutural"},
     {"id": "pt_cliente_recente", "categoria": "Padrão PT",
      "descricao": "Cliente recente no banco com movimentos que só demonstram o crédito do ordenado e poucos débitos, provocando saldos crescentes mês a mês.",
+     "tipo": "conteudo"},
+    {"id": "pt_recibo_sem_dados_trabalhador", "categoria": "Padrão PT",
+     "descricao": "Recibo de vencimento sem os dados do trabalhador para além do nome: morada, NIF, número de funcionário, categoria profissional ou data de admissão/antiguidade em falta no campo dos dados do trabalhador.",
+     "tipo": "conteudo"},
+    {"id": "pt_iht_sem_incidencia", "categoria": "Padrão PT",
+     "descricao": "IHT (subsídio de isenção de horário de trabalho) ou outro complemento remuneratório regular pago sem incidência de Segurança Social e de retenção de IRS. A incidência é obrigatória — o IHT é remuneração sujeita a SS e a IRS; a sua ausência é sinal forte.",
+     "tipo": "conteudo"},
+    {"id": "pt_irs_vs_recibos", "categoria": "Padrão PT",
+     "descricao": "Rendimento bruto anual da declaração/nota de liquidação de IRS incompatível com o rendimento mensal dos recibos ou com o rendimento declarado no processo (regra prática: anual ≈ mensal ×14). Complementos regulares (ex.: IHT mensal) que não estejam refletidos no total anual do IRS.",
      "tipo": "conteudo"},
 
     # ---- Padrões UK emigrantes (Formação) ----

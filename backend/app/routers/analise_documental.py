@@ -321,11 +321,13 @@ def _media_type(file_name: str | None) -> str | None:
     return _MEDIA.get(ext)
 
 
-def _vision_sinais(doc_nome: str, proponente: str, file_name: str, media_type: str, b64: str) -> list[dict]:
+def _vision_sinais(doc_nome: str, proponente: str, file_name: str, media_type: str, b64: str,
+                   contexto: str = "") -> list[dict]:
     """Lê UM ficheiro com o modelo de visão e devolve os sinais de conteúdo
     fundamentados no catálogo. JSON estrito."""
     if not settings.ANTHROPIC_API_KEY:
         return []
+    hoje = datetime.now(timezone.utc).date().isoformat()
     system = (
         "És um analista de prevenção de fraude documental de um intermediário de "
         "crédito português (DS Crédito). Analisas UM ficheiro carregado num "
@@ -338,6 +340,17 @@ def _vision_sinais(doc_nome: str, proponente: str, file_name: str, media_type: s
         "- Analisa aritmética (somatórios de recibos/extratos), coerência de datas, "
         "tipos de letra, campos obrigatórios (NIF/NIB/data), carimbos e assinaturas, "
         "QR codes, descontos de Segurança Social, e incoerências internas.\n"
+        f"- DATAS: a data de referência (hoje) é {hoje}. Em documentos portugueses o "
+        "formato é dia-mês-ano (dd-mm-aaaa) — lê com cuidado antes de comparar. Só "
+        "assinala incoerência de datas quando a comparação for inequívoca (ex.: data de "
+        "emissão anterior ao período a que o documento respeita). Recibos, extratos e "
+        "declarações de meses ou anos anteriores são NORMAIS num processo de crédito — "
+        "a antiguidade do documento, por si só, NUNCA é sinal de alerta.\n"
+        "- Verifica sempre: assinaturas/carimbos onde são exigidos (declarações de "
+        "entidade patronal têm de estar assinadas); dados completos do trabalhador nos "
+        "recibos (morada, NIF, n.º de funcionário, categoria, admissão); incidência de "
+        "SS e IRS sobre complementos regulares como o IHT (é obrigatória); e nitidez "
+        "homogénea da página (texto nítido sobre fundo esbatido = indício de montagem).\n"
         "- Só assinala o que EFETIVAMENTE observas no ficheiro. Se não há sinais, "
         "devolve lista vazia. Não gerar falsos positivos.\n"
         "- Responde APENAS com JSON válido, sem texto à volta:\n"
@@ -357,7 +370,8 @@ def _vision_sinais(doc_nome: str, proponente: str, file_name: str, media_type: s
             block,
             {"type": "text", "text":
                 f"Ficheiro: {file_name}\nTipo de documento: {doc_nome}\nProponente/objeto: {proponente}\n"
-                "Analisa este ficheiro e devolve os sinais de conteúdo em JSON."},
+                + (f"{contexto}\n" if contexto else "")
+                + "Analisa este ficheiro e devolve os sinais de conteúdo em JSON."},
         ]}],
     )
     text = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
@@ -397,6 +411,20 @@ def analisar_conteudo(referencia: str, request: Request):
         lst = client.get_documents(pid)
     except Exception as e:
         raise HTTPException(502, f"Não foi possível ler o processo no CRM: {type(e).__name__}")
+
+    # Contexto do CRM para o modelo de visão (best-effort): rendimento mensal
+    # declarado por proponente — permite cruzar recibos/IRS com o processo
+    # (ex.: total anual do IRS ≈ mensal ×14; IHT mensal refletido no anual).
+    try:
+        prop_raw = client.get_proponents(pid).get("creditprocessproponents") or []
+    except Exception:
+        prop_raw = []
+    rendimentos = [
+        f"{p.get('name') or p.get('customerName')}: {p.get('monthlyIncomeAmount')}€/mês"
+        for p in prop_raw if p.get("monthlyIncomeAmount")
+    ]
+    contexto = ("Rendimento mensal declarado no processo (CRM) — cruza com os valores "
+                "do documento: " + "; ".join(rendimentos)) if rendimentos else ""
 
     # nome legível do tipo de documento (do checklist) + proponente
     checklist = (lst.get("documentsProponents") or []) + (lst.get("documentsRelated") or [])
@@ -440,7 +468,7 @@ def analisar_conteudo(referencia: str, request: Request):
                 return None, {"ficheiro": fname, "motivo": "sem conteúdo devolvido pelo CRM"}, []
             if len(b64) * 3 // 4 > max_bytes:
                 return None, {"ficheiro": fname, "motivo": f"ficheiro > {max_mb:g} MB"}, []
-            fsinais = _vision_sinais(doc_nome, proponente, fname, mt, b64)
+            fsinais = _vision_sinais(doc_nome, proponente, fname, mt, b64, contexto)
         except Exception as e:
             return None, {"ficheiro": fname, "motivo": f"erro na análise ({type(e).__name__})"}, []
         return ({"ficheiro": fname, "documento": doc_nome, "proponente": proponente,
