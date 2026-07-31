@@ -3,6 +3,7 @@ import { useState } from 'react';
 import useSWR from 'swr';
 import Link from 'next/link';
 import { api } from '../../lib/api';
+import { SemaforoCrm } from '../../components/Semaforos';
 
 type Customer = {
   crm_id: number;
@@ -62,9 +63,11 @@ export default function ClientesLive() {
   return (
     <div className="space-y-6">
       <section>
-        <div className="flex items-center gap-2">
-          <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+        <div className="flex items-center gap-3">
+          {/* Era um ponto verde fixo no HTML: dizia "em direto" mesmo com o
+              espelho por sincronizar há dias. Agora mede a frescura real. */}
           <h1 className="text-2xl font-semibold text-ink-900">Clientes em direto do CRM</h1>
+          <SemaforoCrm />
         </div>
         <p className="text-ink-400 mt-1 text-sm">
           Âmbito: <span className="font-medium text-ink-600">{scopeLbl}</span>

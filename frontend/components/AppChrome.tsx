@@ -68,7 +68,26 @@ const config: SynertiaConfig = {
   fullWidthRoutes: ['/dashboard'],
 };
 
+// A barra lateral do SynertiaShell guarda o estado "fixada" em localStorage
+// (`synertia-sidebar-pinned`), por DOMÍNIO, e arranca recolhida quando não há valor.
+// Resultado: a mesma plataforma aparecia expandida numa loja e em rail noutra, só
+// porque alguém tinha carregado no alfinete num dos sites. Aqui semeia-se o valor
+// por defeito — fixada — para todas as instalações nascerem iguais.
+//
+// É escrito no RENDER e não num efeito de propósito: os efeitos do filho correm
+// ANTES dos do pai, portanto num useEffect a semente só valeria no reload seguinte.
+// Quem já tiver preferência guardada mantém-na — é dele, não se sobrepõe.
+function semearBarraFixada() {
+  if (typeof window === 'undefined') return;
+  try {
+    if (window.localStorage.getItem('synertia-sidebar-pinned') === null) {
+      window.localStorage.setItem('synertia-sidebar-pinned', '1');
+    }
+  } catch { /* localStorage bloqueado (modo privado): segue com o default do pacote */ }
+}
+
 export default function AppChrome({ children }: { children: React.ReactNode }) {
+  semearBarraFixada();
   const pathname = usePathname();
   const { me, caps } = useMe();
   const [aboutOpen, setAboutOpen] = useState(false);

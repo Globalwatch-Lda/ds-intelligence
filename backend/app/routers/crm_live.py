@@ -1,7 +1,7 @@
 """Live CRM mirror — paginated + searchable view of ds.clientes_real."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Query, Request
 
@@ -91,6 +91,68 @@ def _select_all(sb, columns: str, page_size: int = 1000) -> list[dict]:
             break
         offset += page_size
     return rows
+
+
+@router.get("/estado")
+def estado_sincronizacao(request: Request):
+    """Saúde REAL do espelho do CRM, para o semáforo da interface.
+
+    A página lê `clientes_real`, que é um espelho alimentado pelos workers noturnos
+    — não é uma ligação viva ao CrediDesk. Logo, o que interessa mostrar não é
+    "consigo falar com o CRM agora", é "os dados que estás a ver são recentes".
+
+    O indicador estava pintado de verde no HTML, sempre. Teria dito "em direto"
+    durante os dois dias de julho em que as três ingestões falharam todas as noites
+    por falta do Chromium — que foi exatamente o período em que ninguém reparou.
+
+      ok        última corrida de cada fonte sem erro e com menos de 26h
+      atrasado  sem erros, mas os dados já têm mais de 26h (o cron é diário)
+      falhou    a última corrida de alguma fonte registou erro
+      sem_dados nunca correu / tabela de auditoria vazia
+    """
+    sb = supabase()
+    fontes = ("credidesk_customers", "credidesk_processos", "credidesk_leads")
+    agora = datetime.now(timezone.utc)
+    ultimas: list[dict] = []
+    for fonte in fontes:
+        row = (
+            sb.table("crm_sync_runs").select("source, started_at, error")
+            .eq("source", fonte).order("started_at", desc=True).limit(1).execute().data or [None]
+        )[0]
+        if row:
+            ultimas.append(row)
+
+    if not ultimas:
+        return {"estado": "sem_dados", "ok": False, "detalhe": "Nunca houve uma sincronização registada."}
+
+    falhadas = [r for r in ultimas if r.get("error")]
+    if falhadas:
+        r = falhadas[0]
+        return {
+            "estado": "falhou", "ok": False,
+            "ultima": r.get("started_at"),
+            "fontes_com_erro": [x["source"] for x in falhadas],
+            "detalhe": (r.get("error") or "")[:200],
+        }
+
+    def _idade(iso: str | None) -> float:
+        if not iso:
+            return 1e9
+        try:
+            t = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+            return (agora - (t if t.tzinfo else t.replace(tzinfo=timezone.utc))).total_seconds() / 3600
+        except ValueError:
+            return 1e9
+
+    mais_antiga = max(_idade(r.get("started_at")) for r in ultimas)
+    atrasado = mais_antiga > 26  # o cron é diário; 26h dá folga ao horário de verão
+    return {
+        "estado": "atrasado" if atrasado else "ok",
+        "ok": not atrasado,
+        "ultima": min((r.get("started_at") for r in ultimas), key=lambda x: str(x)),
+        "horas": round(mais_antiga, 1),
+        "detalhe": f"Dados sincronizados há {mais_antiga:.0f}h." if atrasado else "Sincronizado nas últimas 24h.",
+    }
 
 
 @router.get("/filters")
