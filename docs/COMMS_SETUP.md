@@ -71,10 +71,15 @@ dele. O servidor Evolution é partilhado e vive **no assist** (ver `DEPLOY.md` �
 ```
 EVOLUTION_API_URL=http://127.0.0.1:8088   # via túnel SSH para o assist
 EVOLUTION_API_KEY=<AUTHENTICATION_API_KEY do servidor Evolution>
-EVOLUTION_INSTANCE_PREFIX=ds_             # ds_ Ramada, dsl_ Loulé — único por loja
 EVOLUTION_INSTANCE=<instância da loja>     # fallback opcional
 ```
-Sem URL **ou** key, o canal fica inerte.
+O **prefixo das instâncias** já NÃO se põe no `.env`: deriva do número da loja
+(`loja_config.numero`, Configurações → Loja) — `ds839_` Ramada, `ds824_` Loulé.
+É o que separa as instâncias de cada loja no servidor Evolution partilhado; era
+uma env var por loja e uma loja que se esquecesse dela aterrava nas instâncias de
+outra. `EVOLUTION_INSTANCE_PREFIX` ainda existe e ganha, para casos especiais.
+
+Sem URL, sem key **ou sem número de loja definido**, o canal fica inerte.
 
 ### 1.4 Worker de envio (cron)
 A entrega faseada é feita por um worker que corre periodicamente. Adicionar ao cron da box:
@@ -130,7 +135,7 @@ testar; em produção não é entregue (sem enumeração de contas).
 | `SES_REGION`, `SES_FROM` | Email | `SES_FROM` vazio = email desligado |
 | `AWS_SMS_REGION`, `SMS_SENDER` | SMS | sender ID alfanumérico |
 | `META_WA_PHONE_NUMBER_ID`, `META_WA_ACCESS_TOKEN` | WhatsApp Meta | número oficial da loja |
-| `EVOLUTION_API_URL`, `EVOLUTION_API_KEY` | WhatsApp Evolution | ambas obrigatórias; `_INSTANCE_PREFIX` único por loja |
+| `EVOLUTION_API_URL`, `EVOLUTION_API_KEY` | WhatsApp Evolution | ambas obrigatórias; o prefixo das instâncias vem do número da loja, não do .env |
 
 Tabelas: `ds.messaging_config` (limites por canal), `ds.envios` (fila + histórico).
 Worker: `backend/scripts/run_dispatcher.py`. Código: o módulo empacotado
