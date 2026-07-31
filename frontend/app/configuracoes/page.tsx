@@ -723,6 +723,37 @@ function Segredo({
   );
 }
 
+// Envio real de prova. O rótulo "configurado" só verifica que os campos estão
+// preenchidos — não que o token é válido nem que a mensagem chega. Isto verifica.
+function TesteCanal({ canal, placeholder }: { canal: string; placeholder: string }) {
+  const [dest, setDest] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<{ ok: boolean; texto: string } | null>(null);
+
+  async function testar() {
+    setBusy(true); setRes(null);
+    try {
+      const r = await api<{ entregue: boolean; erro: string | null }>('/api/messaging/settings/test', {
+        method: 'POST', body: JSON.stringify({ canal, destinatario: dest.trim() }),
+      });
+      setRes(r.entregue
+        ? { ok: true, texto: '✓ Entregue. O canal está operacional.' }
+        : { ok: false, texto: r.erro || 'Não entregou, sem erro devolvido.' });
+    } catch (e: any) { setRes({ ok: false, texto: errDetail(e) }); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="border-t border-ink-100 pt-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-0 flex-1"><Field label="Enviar teste para" value={dest} onChange={(e) => setDest(e.target.value)} placeholder={placeholder} /></div>
+        <button onClick={testar} disabled={busy || !dest.trim()} className="btn-ghost shrink-0">{busy ? 'A enviar …' : 'Testar'}</button>
+      </div>
+      {res && <p className={`mt-2 break-words text-xs ${res.ok ? 'text-green-700' : 'text-ds-700'}`}>{res.texto}</p>}
+      <p className="mt-1 text-xs text-ink-400">Envia uma mensagem a sério, sem passar pela fila e mesmo com o canal desligado.</p>
+    </div>
+  );
+}
+
 function CredenciaisTab() {
   const { data, mutate } = useSWR<MCSettings>('/api/messaging/settings', api);
   const [f, setF] = useState<Record<string, string>>({});
@@ -770,6 +801,7 @@ function CredenciaisTab() {
           <Field label="Região SES" value={f.ses_region ?? ''} onChange={set('ses_region')} placeholder="eu-west-1" />
           <Field label="Remetente (From)" value={f.ses_from ?? ''} onChange={set('ses_from')} placeholder="DS Crédito <noreply@dscredito.pt>" />
         </div>
+        <TesteCanal canal="email" placeholder="o.seu.email@exemplo.pt" />
       </div>
 
       <div className="card space-y-3">
@@ -778,6 +810,7 @@ function CredenciaisTab() {
           <Field label="Região" value={f.aws_sms_region ?? ''} onChange={set('aws_sms_region')} placeholder="eu-west-1" />
           <Field label="Sender ID" value={f.sms_sender ?? ''} onChange={set('sms_sender')} placeholder="DSCredito" />
         </div>
+        <TesteCanal canal="sms" placeholder="+3519XXXXXXXX" />
       </div>
 
       <div className="card space-y-3">
@@ -791,6 +824,7 @@ function CredenciaisTab() {
                  valor={segredos.meta_wa_access_token ?? ''}
                  onChange={(v) => setSegredos({ ...segredos, meta_wa_access_token: v })}
                  onLimpar={() => setSegredos({ ...segredos, meta_wa_access_token: '' })} />
+        <TesteCanal canal="whatsapp_meta" placeholder="351XXXXXXXXX" />
       </div>
 
       <div className="card space-y-3">
@@ -809,6 +843,7 @@ function CredenciaisTab() {
             desta loja das das outras no servidor partilhado. Sem número de loja, o canal fica inativo.
           </p>
         </div>
+        <TesteCanal canal="whatsapp_evolution" placeholder="351XXXXXXXXX" />
       </div>
 
       <div className="flex items-center gap-3">
