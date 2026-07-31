@@ -22,7 +22,14 @@ from pydantic import BaseModel
 
 from ..core.crypto import encrypt_secret, hash_password
 from ..core.names import fix_name
-from ..core.scope import acting_data_scope, apply_scope, has_cap, require_cap, user_scope
+from ..core.scope import (
+    acting_data_scope,
+    apply_scope,
+    has_cap,
+    require_cap,
+    require_superadmin,
+    user_scope,
+)
 from ..db import supabase
 from .auth import COOKIE_NAME, token_user
 
@@ -351,6 +358,66 @@ def list_managers(request: Request):
     return {"managers": managers}
 
 
+# ---- catálogo de lojas ---------------------------------------------------
+# O CrediDesk NÃO serve esta lista: cada conta só alcança a sua própria agência
+# (verificado 31 jul 2026 — /agency/{outra} devolve code -1 e não há endpoint de
+# listagem). Por isso o catálogo é mantido à mão e só o superadmin lhe mexe; para
+# todos os outros é uma lista fixa, de onde se escolhe a loja da instalação.
+def _loja_existe(sb, numero: str | None) -> bool:
+    if not numero:
+        return False
+    return bool(sb.table("lojas").select("numero").eq("numero", numero).limit(1).execute().data)
+
+
+class LojaCatalogoIn(BaseModel):
+    numero: str
+    nome: str
+
+
+@router.get("/lojas")
+def list_lojas():
+    """Catálogo completo. Legível por qualquer sessão — a combobox precisa dele
+    para mostrar o nome da loja atual, mesmo a quem não pode editar."""
+    rows = supabase().table("lojas").select("numero, nome").order("nome").execute().data or []
+    return {"lojas": rows}
+
+
+@router.post("/lojas")
+def create_loja(body: LojaCatalogoIn, request: Request):
+    require_superadmin(request)
+    numero = (body.numero or "").strip()
+    nome = (body.nome or "").strip()
+    if not numero or not nome:
+        raise HTTPException(400, "Número e nome são obrigatórios.")
+    sb = supabase()
+    if _loja_existe(sb, numero):
+        raise HTTPException(409, "Já existe uma loja com esse número.")
+    sb.table("lojas").insert({"numero": numero, "nome": nome}).execute()
+    return {"ok": True}
+
+
+@router.put("/lojas/{numero}")
+def update_loja(numero: str, body: LojaCatalogoIn, request: Request):
+    require_superadmin(request)
+    if not (body.nome or "").strip():
+        raise HTTPException(400, "Nome é obrigatório.")
+    # O número é a chave natural (agencyId do CrediDesk) e não se renomeia aqui —
+    # mudá-lo separaria a loja dos dados que já lhe apontam. Para trocar, criar outra.
+    supabase().table("lojas").update({"nome": body.nome.strip(), "updated_at": _now()}).eq("numero", numero).execute()
+    return {"ok": True}
+
+
+@router.delete("/lojas/{numero}")
+def delete_loja(numero: str, request: Request):
+    require_superadmin(request)
+    sb = supabase()
+    atual = (sb.table("loja_config").select("numero").eq("id", 1).limit(1).execute().data or [{}])[0]
+    if (atual.get("numero") or "") == numero:
+        raise HTTPException(409, "Não se apaga a loja que esta instalação está a usar.")
+    sb.table("lojas").delete().eq("numero", numero).execute()
+    return {"ok": True}
+
+
 # ---- loja config ---------------------------------------------------------
 @router.get("/loja")
 def get_loja():
@@ -379,7 +446,17 @@ class LojaIn(BaseModel):
 def put_loja(body: LojaIn, request: Request):
     require_cap(request, "loja.edit")
     sb = supabase()
-    upd = {"numero": body.numero, "nome": body.nome, "updated_at": _now()}
+    upd = {"nome": body.nome, "updated_at": _now()}
+    # QUAL loja é esta instalação só o superadmin decide: trocá-la reaponta a
+    # identidade da instalação inteira. Um diretor de loja com `loja.edit` continua
+    # a poder afinar o resto (nome apresentado, limites da Análise Documental).
+    if body.numero is not None:
+        atual = (sb.table("loja_config").select("numero").eq("id", 1).limit(1).execute().data or [{}])[0]
+        if (body.numero or "") != (atual.get("numero") or ""):
+            require_superadmin(request)
+            if not _loja_existe(sb, body.numero):
+                raise HTTPException(400, "Número de loja não consta do catálogo.")
+            upd["numero"] = body.numero
     # limites: aceita valores sensatos; guarda tal como vêm (None não mexe se nulo)
     if body.analise_max_ficheiros is not None:
         upd["analise_max_ficheiros"] = max(1, min(int(body.analise_max_ficheiros), 50))

@@ -16,6 +16,14 @@ type UserFull = {
 };
 type Equipa = { id: number; nome: string; lider_id: number | null; lider_nome: string | null; membros: { id: number; nome: string | null; username: string; role: string }[] };
 
+// `api()` lança "API <path> → <status>: <body>"; mostra-se o `detail` do FastAPI
+// em vez do envelope inteiro.
+function errDetail(e: any): string {
+  const raw = String(e?.message ?? e ?? '');
+  const body = raw.slice(raw.indexOf(': ') + 2);
+  try { return JSON.parse(body)?.detail || raw; } catch { return raw; }
+}
+
 function Field({ label, ...props }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block">
@@ -790,11 +798,18 @@ type LojaCfg = {
   numero: string | null; nome: string | null;
   analise_max_ficheiros: number | null; analise_max_file_mb: number | null;
 };
+type LojaCatalogo = { numero: string; nome: string };
+
 function LojaTab({ canEdit }: { canEdit: boolean }) {
+  const { me } = useMe();
+  const superadmin = !!me?.is_superadmin;
   const { data, mutate } = useSWR<LojaCfg>('/api/settings/loja', api);
+  const { data: cat, mutate: mutCat } = useSWR<{ lojas: LojaCatalogo[] }>('/api/settings/lojas', api);
+  const lojas = cat?.lojas ?? [];
   const [f, setF] = useState({ numero: '', nome: '', analise_max_ficheiros: '', analise_max_file_mb: '' });
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showCat, setShowCat] = useState(false);
 
   useEffect(() => {
     if (data) setF({
@@ -819,7 +834,25 @@ function LojaTab({ canEdit }: { canEdit: boolean }) {
   if (!data) return <p className="text-sm text-ink-400">A carregar …</p>;
   return (
     <section className="card max-w-md space-y-4">
-      <Field label="Número da loja" value={f.numero} onChange={(e) => setF({ ...f, numero: e.target.value })} disabled={!canEdit} />
+      {/* Que loja É esta instalação. Fixa para todos; só o superadmin (sentinela)
+          a troca, porque muda a identidade da instalação inteira. */}
+      <div>
+        <Select label="Loja (número do CrediDesk)" value={f.numero}
+                onChange={(e) => setF({ ...f, numero: e.target.value })} disabled={!superadmin}>
+          <option value="">— por definir —</option>
+          {lojas.map((l) => <option key={l.numero} value={l.numero}>{l.numero} · {l.nome}</option>)}
+          {/* Um número gravado que já não conste do catálogo continua visível,
+              senão o select mostrava vazio e o guardar apagava-o sem se perceber. */}
+          {f.numero && !lojas.some((l) => l.numero === f.numero) && (
+            <option value={f.numero}>{f.numero} · (fora do catálogo)</option>
+          )}
+        </Select>
+        {superadmin ? (
+          <button onClick={() => setShowCat(true)} className="mt-1 text-xs text-ds-700 hover:underline">Gerir catálogo de lojas</button>
+        ) : (
+          <p className="mt-1 text-xs text-ink-400">Definida pela GlobalWatch. Fale connosco se estiver errada.</p>
+        )}
+      </div>
       <Field label="Nome da loja (aparece no cabeçalho)" value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} disabled={!canEdit} />
 
       <div className="pt-2 border-t border-ink-100">
@@ -841,7 +874,66 @@ function LojaTab({ canEdit }: { canEdit: boolean }) {
       ) : (
         <p className="text-xs text-ink-400">Sem permissão para alterar os dados da loja.</p>
       )}
+      {showCat && <CatalogoLojasDialog lojas={lojas} atual={data.numero} onClose={() => setShowCat(false)} onChange={() => mutCat()} />}
     </section>
+  );
+}
+
+// Catálogo partilhado por todas as instalações DS — só o superadmin lhe mexe.
+// Mantido à mão de propósito: o CrediDesk não expõe a lista de agências (cada
+// conta só alcança a sua), por isso não há de onde a importar.
+function CatalogoLojasDialog({
+  lojas, atual, onClose, onChange,
+}: { lojas: LojaCatalogo[]; atual: string | null; onClose: () => void; onChange: () => void }) {
+  const [novo, setNovo] = useState({ numero: '', nome: '' });
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function run(fn: () => Promise<any>) {
+    setMsg(null);
+    try { await fn(); onChange(); } catch (e: any) { setMsg(errDetail(e)); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" onClick={onClose} role="dialog" aria-modal="true">
+      <div className="w-full max-w-lg rounded-xl border border-ink-100 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-ink-100 px-4 py-3">
+          <h2 className="text-sm font-semibold text-ink-900">Catálogo de lojas</h2>
+          <button onClick={onClose} className="text-2xl leading-none text-ink-400 hover:text-ds-600">×</button>
+        </div>
+        <div className="space-y-4 px-4 py-4">
+          <p className="text-xs text-ink-400">
+            O número é o <b>agencyId do CrediDesk</b> e serve de chave — não se altera depois de criado.
+            Esta lista é a mesma em todas as instalações DS.
+          </p>
+          <ul className="divide-y divide-ink-100 rounded-lg border border-ink-100">
+            {lojas.map((l) => (
+              <li key={l.numero} className="flex items-center gap-2 px-3 py-2">
+                <span className="w-14 shrink-0 font-mono text-sm text-ink-500">{l.numero}</span>
+                <input defaultValue={l.nome} onBlur={(e) => {
+                  const nome = e.target.value.trim();
+                  if (nome && nome !== l.nome) run(() => api(`/api/settings/lojas/${l.numero}`, { method: 'PUT', body: JSON.stringify({ numero: l.numero, nome }) }));
+                }} className="min-w-0 flex-1 rounded-md border border-ink-200 px-2 py-1 text-sm" />
+                {l.numero === atual ? (
+                  <span className="shrink-0 text-xs text-ink-400">(esta instalação)</span>
+                ) : (
+                  <button onClick={() => { if (confirm(`Apagar a loja ${l.numero} — ${l.nome}?`)) run(() => api(`/api/settings/lojas/${l.numero}`, { method: 'DELETE' })); }}
+                          className="shrink-0 text-xs text-ds-700 hover:underline">apagar</button>
+                )}
+              </li>
+            ))}
+            {!lojas.length && <li className="px-3 py-2 text-sm text-ink-400">Catálogo vazio.</li>}
+          </ul>
+          <div className="flex items-end gap-2">
+            <Field label="Número" value={novo.numero} onChange={(e) => setNovo({ ...novo, numero: e.target.value })} />
+            <Field label="Nome" value={novo.nome} onChange={(e) => setNovo({ ...novo, nome: e.target.value })} />
+            <button disabled={!novo.numero.trim() || !novo.nome.trim()}
+                    onClick={() => run(async () => { await api('/api/settings/lojas', { method: 'POST', body: JSON.stringify(novo) }); setNovo({ numero: '', nome: '' }); })}
+                    className="btn-primary shrink-0">Adicionar</button>
+          </div>
+          {msg && <p className="text-sm text-ds-700">{msg}</p>}
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -51,7 +51,7 @@ def _db_user(username: str) -> dict | None:
         res = (
             supabase()
             .table("platform_users")
-            .select("id, username, nome, role, can_newsletter, password_hash, password_salt, is_active")
+            .select("id, username, nome, role, can_newsletter, password_hash, password_salt, is_active, is_superadmin")
             .eq("username", username)
             .eq("is_active", True)
             .limit(1)
@@ -180,6 +180,9 @@ def me(request: Request):
         "role": role,
         "user_id": (row.get("id") if row else None),
         "can_newsletter": can_newsletter,
+        # Sentinela GlobalWatch (migração 027): ortogonal ao perfil, por isso vai
+        # à parte das capabilities. A UI usa-o para deixar editar o catálogo de lojas.
+        "is_superadmin": bool(row.get("is_superadmin")) if row else False,
         "capabilities": sorted(user_capabilities(request)),
         "data_scope": acting_data_scope(request),
     }

@@ -29,6 +29,23 @@ def current_username(request: Request) -> str | None:
     return token_user(request.cookies.get(COOKIE_NAME))
 
 
+def is_superadmin(request: Request) -> bool:
+    """Sentinela GlobalWatch — flag ortogonal ao perfil (ver migração 027).
+
+    Só ele edita o catálogo de lojas e escolhe a loja da instalação: são dados
+    partilhados por todas as instalações DS, não da loja que lá está.
+    """
+    username = current_username(request)
+    if not username:
+        return False
+    return bool((_user_row(username) or {}).get("is_superadmin"))
+
+
+def require_superadmin(request: Request) -> None:
+    if not is_superadmin(request):
+        raise HTTPException(403, "Reservado ao superadministrador.")
+
+
 def _user_row(username: str) -> dict | None:
     try:
         from ..db import supabase
@@ -36,7 +53,7 @@ def _user_row(username: str) -> dict | None:
         return (
             supabase()
             .table("platform_users")
-            .select("id, username, nome, role, manager_id, manager_crm_id, is_active")
+            .select("id, username, nome, role, manager_id, manager_crm_id, is_active, is_superadmin")
             .eq("username", username)
             .eq("is_active", True)
             .limit(1)

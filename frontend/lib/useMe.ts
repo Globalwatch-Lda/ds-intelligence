@@ -9,6 +9,8 @@ export type Me = {
   role?: string;
   user_id?: number | null;
   can_newsletter?: boolean;
+  // Sentinela GlobalWatch — ortogonal ao perfil, por isso fora das capabilities.
+  is_superadmin?: boolean;
   capabilities?: string[];
   data_scope?: string;
 };
