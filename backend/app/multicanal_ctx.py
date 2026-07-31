@@ -30,6 +30,33 @@ from .db import supabase  # noqa: E402
 from .routers.auth import COOKIE_NAME, token_user  # noqa: E402
 
 
+def _prefixo_instancias() -> str:
+    """Namespace das instâncias WhatsApp desta loja: `ds<numero da loja>_`.
+
+    O número vem do `loja_config` (Configurações → Loja), não de uma variável que
+    alguém tem de se lembrar de pôr no .env. Era esse o risco: o prefixo é a ÚNICA
+    coisa que separa as instâncias de duas lojas no servidor Evolution partilhado,
+    e um .env esquecido fazia a loja nova aterrar nas instâncias da Ramada — o
+    utilizador `ds` das duas resolvia para a mesma sessão de WhatsApp.
+
+    Devolve "" se o número não estiver definido: o canal fica inerte com erro
+    explícito, que é infinitamente melhor do que enviar pelo número de outra loja.
+    O env EVOLUTION_INSTANCE_PREFIX ainda ganha, para uma loja poder fugir à regra.
+    """
+    import os
+
+    if os.environ.get("EVOLUTION_INSTANCE_PREFIX"):
+        return os.environ["EVOLUTION_INSTANCE_PREFIX"]
+    try:
+        row = (
+            supabase().table("loja_config").select("numero").eq("id", 1).limit(1).execute().data or [{}]
+        )[0]
+        numero = (row.get("numero") or "").strip()
+    except Exception:  # BD indisponível → inerte, nunca um prefixo adivinhado
+        return ""
+    return f"ds{numero}_" if numero else ""
+
+
 def _settings() -> MulticanalSettings:
     s = MulticanalSettings.from_env()
     # Marca DS: logo do email a partir do APP_BASE_URL (mesmo asset do mailer local).
@@ -37,6 +64,7 @@ def _settings() -> MulticanalSettings:
         s.brand_logo_url = f"{_cfg.APP_BASE_URL.rstrip('/')}/ds-logo-email.png"
     if not s.brand_name:
         s.brand_name = _cfg.LOJA_NAME
+    s.evolution_instance_prefix = _prefixo_instancias()
     return s
 
 
