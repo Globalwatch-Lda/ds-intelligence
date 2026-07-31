@@ -171,7 +171,7 @@ def me(request: Request):
     can_newsletter = bool(row.get("can_newsletter")) if row else True
     # RBAC: capabilities + CRM data scope come from the user's profile (ds.perfis).
     # Lazy import — core.scope imports from this module.
-    from ..core.scope import user_capabilities, acting_data_scope
+    from ..core.scope import user_capabilities, acting_data_scope, is_superadmin
 
     return {
         "authenticated": True,
@@ -181,8 +181,10 @@ def me(request: Request):
         "user_id": (row.get("id") if row else None),
         "can_newsletter": can_newsletter,
         # Sentinela GlobalWatch (migração 027): ortogonal ao perfil, por isso vai
-        # à parte das capabilities. A UI usa-o para deixar editar o catálogo de lojas.
-        "is_superadmin": bool(row.get("is_superadmin")) if row else False,
+        # à parte das capabilities. UMA só definição, partilhada com o servidor —
+        # calculá-la aqui à parte foi o que fez a UI e a API discordarem sobre os
+        # logins de ambiente (ds/amin), com as tabs escondidas a quem tinha acesso.
+        "is_superadmin": is_superadmin(request),
         "capabilities": sorted(user_capabilities(request)),
         "data_scope": acting_data_scope(request),
     }

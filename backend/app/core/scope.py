@@ -32,13 +32,40 @@ def current_username(request: Request) -> str | None:
 def is_superadmin(request: Request) -> bool:
     """Sentinela GlobalWatch — flag ortogonal ao perfil (ver migração 027).
 
-    Só ele edita o catálogo de lojas e escolhe a loja da instalação: são dados
-    partilhados por todas as instalações DS, não da loja que lá está.
+    Só ele edita o catálogo de lojas, escolhe a loja da instalação e configura os
+    canais: são dados partilhados por todas as instalações DS, não da loja que lá está.
+
+    Os logins de ambiente (`ds`/`amin`, sem linha em `platform_users`) contam como
+    sentinela, pela mesma razão que já são admins totais no resto deste módulo — são
+    as contas de operação da Synertia. Sem isto, uma instalação nova, antes de ter
+    utilizadores criados, ficava sem NINGUÉM que pudesse configurar seja o que for.
+
+    A distinção entre "não tem linha" e "não consegui ler a BD" é deliberada: ausência
+    confirmada concede, erro nega. Conceder por falha de leitura seria abrir a
+    configuração toda a qualquer sessão sempre que a base tivesse um soluço.
     """
     username = current_username(request)
     if not username:
         return False
-    return bool((_user_row(username) or {}).get("is_superadmin"))
+    try:
+        from ..db import supabase
+
+        rows = (
+            supabase()
+            .table("platform_users")
+            .select("is_superadmin")
+            .eq("username", username)
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+    except Exception:
+        return False
+    if not rows:
+        return True
+    return bool(rows[0].get("is_superadmin"))
 
 
 def require_superadmin(request: Request) -> None:
