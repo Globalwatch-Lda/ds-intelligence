@@ -689,6 +689,8 @@ function ComunicacaoTab() {
 // deixado em branco PRESERVA o que lá está; para apagar há o "limpar" explícito.
 type MCSettings = {
   ses_region: string; ses_from: string;
+  scw_tem_secret_key: boolean; scw_tem_project_id: string; scw_tem_region: string;
+  scw_tem_from: string; scw_tem_from_name: string;
   aws_sms_region: string; sms_sender: string;
   meta_wa_phone_number_id: string; meta_wa_access_token: boolean; meta_wa_api_version: string;
   evolution_api_url: string; evolution_api_key: boolean; evolution_instance: string;
@@ -899,6 +901,8 @@ function CredenciaisTab() {
     if (!data) return;
     setF({
       ses_region: data.ses_region ?? '', ses_from: data.ses_from ?? '',
+      scw_tem_project_id: data.scw_tem_project_id ?? '', scw_tem_region: data.scw_tem_region ?? '',
+      scw_tem_from: data.scw_tem_from ?? '', scw_tem_from_name: data.scw_tem_from_name ?? '',
       aws_sms_region: data.aws_sms_region ?? '', sms_sender: data.sms_sender ?? '',
       meta_wa_phone_number_id: data.meta_wa_phone_number_id ?? '', meta_wa_api_version: data.meta_wa_api_version ?? '',
       evolution_api_url: data.evolution_api_url ?? '', evolution_instance: data.evolution_instance ?? '',
@@ -932,11 +936,35 @@ function CredenciaisTab() {
       </p>
 
       <div className="card space-y-3">
-        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-ink-900">Email (AWS SES)</h3><Estado ok={!!ch.email} /></div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Região SES" value={f.ses_region ?? ''} onChange={set('ses_region')} placeholder="eu-west-1" />
-          <Field label="Remetente (From)" value={f.ses_from ?? ''} onChange={set('ses_from')} placeholder="DS Crédito <noreply@dscredito.pt>" />
+        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-ink-900">Email</h3><Estado ok={!!ch.email} /></div>
+        <p className="text-xs text-ink-400">
+          Há dois transportes. O <b>Scaleway TEM</b> é o da frota e o preferido: se estiver preenchido,
+          é o usado. O <b>AWS SES</b> fica como alternativa — mas exige credenciais AWS no servidor,
+          que deixaram de existir quando a plataforma saiu da AWS.
+        </p>
+
+        <div className="rounded-lg border border-ink-100 p-3 space-y-3">
+          <p className="text-xs font-semibold text-ink-600">Scaleway TEM</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Project ID" value={f.scw_tem_project_id ?? ''} onChange={set('scw_tem_project_id')} />
+            <Field label="Região" value={f.scw_tem_region ?? ''} onChange={set('scw_tem_region')} placeholder="fr-par" />
+            <Field label="Remetente (domínio verificado)" value={f.scw_tem_from ?? ''} onChange={set('scw_tem_from')} placeholder="noreply@notify.synertia-gw.ai" />
+            <Field label="Nome do remetente" value={f.scw_tem_from_name ?? ''} onChange={set('scw_tem_from_name')} placeholder="DS Crédito" />
+          </div>
+          <Segredo label="Chave secreta do TEM" definido={!!data.scw_tem_secret_key}
+                   valor={segredos.scw_tem_secret_key ?? ''}
+                   onChange={(v) => setSegredos({ ...segredos, scw_tem_secret_key: v })}
+                   onLimpar={() => setSegredos({ ...segredos, scw_tem_secret_key: '' })} />
         </div>
+
+        <div className="rounded-lg border border-ink-100 p-3 space-y-3">
+          <p className="text-xs font-semibold text-ink-600">AWS SES <span className="font-normal text-ink-400">(alternativa)</span></p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Região SES" value={f.ses_region ?? ''} onChange={set('ses_region')} placeholder="eu-west-1" />
+            <Field label="Remetente (From)" value={f.ses_from ?? ''} onChange={set('ses_from')} placeholder="DS Crédito <noreply@dscredito.pt>" />
+          </div>
+        </div>
+
         <TesteCanal canal="email" placeholder="o.seu.email@exemplo.pt" />
       </div>
 
