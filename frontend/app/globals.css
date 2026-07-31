@@ -2,6 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Escala base da plataforma.
+   Tudo no Tailwind (tipos, espaçamentos, raios, larguras) é dimensionado em `rem`,
+   ou seja, relativo a esta medida. Baixá-la de 16px para 80% encolhe a interface
+   inteira de forma proporcional — é o mesmo efeito de pôr o browser a 80%, mas
+   passa a ser o comportamento POR DEFEITO, igual em todas as lojas e em todas as
+   máquinas, em vez de depender de uma preferência que o Chrome guarda por domínio.
+
+   O utilizador continua a poder afinar com o zoom do browser por cima disto, e
+   quem tiver o tamanho de letra do sistema aumentado por acessibilidade continua a
+   ser respeitado, porque a base é percentual e não um valor fixo em píxeis. */
+html {
+  font-size: 80%;
+}
+
 html, body {
   background-color: #d7dce8;
   /* Single large navy Synertia watermark, centred and fixed behind every page. */
