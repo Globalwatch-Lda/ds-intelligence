@@ -358,6 +358,32 @@ def list_managers(request: Request):
     return {"managers": managers}
 
 
+# ---- assistentes de configuração passo a passo ---------------------------
+# Só guarda que passos estão dados. Os passos verificáveis (credenciais presentes,
+# teste entregue, canal ativo) são derivados no cliente a partir dos endpoints que
+# já existem — duplicá-los aqui daria duas verdades sobre o mesmo facto.
+class SetupIn(BaseModel):
+    dados: dict
+
+
+@router.get("/setup/{chave}")
+def get_setup(chave: str, request: Request):
+    require_cap(request, "messaging.config")
+    row = (
+        supabase().table("setup_estado").select("dados").eq("chave", chave).limit(1).execute().data or [{}]
+    )[0]
+    return {"chave": chave, "dados": row.get("dados") or {}}
+
+
+@router.put("/setup/{chave}")
+def put_setup(chave: str, body: SetupIn, request: Request):
+    require_cap(request, "messaging.config")
+    supabase().table("setup_estado").upsert(
+        {"chave": chave, "dados": body.dados or {}, "updated_at": _now()}
+    ).execute()
+    return {"ok": True}
+
+
 # ---- catálogo de lojas ---------------------------------------------------
 # O CrediDesk NÃO serve esta lista: cada conta só alcança a sua própria agência
 # (verificado 31 jul 2026 — /agency/{outra} devolve code -1 e não há endpoint de

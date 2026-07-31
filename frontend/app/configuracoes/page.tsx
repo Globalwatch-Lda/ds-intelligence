@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import useSWR from 'swr';
+import useSWR, { useSWRConfig } from 'swr';
 import { api } from '../../lib/api';
 import { useMe } from '../../lib/useMe';
 
@@ -725,7 +725,7 @@ function Segredo({
 
 // Envio real de prova. O rótulo "configurado" só verifica que os campos estão
 // preenchidos — não que o token é válido nem que a mensagem chega. Isto verifica.
-function TesteCanal({ canal, placeholder }: { canal: string; placeholder: string }) {
+function TesteCanal({ canal, placeholder, onSucesso }: { canal: string; placeholder: string; onSucesso?: () => void }) {
   const [dest, setDest] = useState('');
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<{ ok: boolean; texto: string } | null>(null);
@@ -739,6 +739,7 @@ function TesteCanal({ canal, placeholder }: { canal: string; placeholder: string
       setRes(r.entregue
         ? { ok: true, texto: '✓ Entregue. O canal está operacional.' }
         : { ok: false, texto: r.erro || 'Não entregou, sem erro devolvido.' });
+      if (r.entregue) onSucesso?.();
     } catch (e: any) { setRes({ ok: false, texto: errDetail(e) }); } finally { setBusy(false); }
   }
 
@@ -754,8 +755,141 @@ function TesteCanal({ canal, placeholder }: { canal: string; placeholder: string
   );
 }
 
+// ---- Assistente de configuração do WhatsApp Meta -------------------------
+// Os passos que a plataforma CONSEGUE verificar (credenciais preenchidas, teste
+// entregue, canal ligado) são derivados dos endpoints que já existem — nunca de um
+// visto do utilizador, senão o assistente diz "feito" sobre coisas que não estão.
+// Os restantes acontecem todos dentro da Meta e ninguém daqui os pode confirmar,
+// por isso são vistos manuais, guardados no servidor: isto leva dias e passa por
+// mais do que uma pessoa.
+type Passo = { id: string; titulo: string; fazer: React.ReactNode; produz?: string; auto?: boolean };
+
+const PASSOS_META: Passo[] = [
+  { id: 'numero', titulo: 'Arranjar um número dedicado',
+    fazer: <>O número <b>não pode estar em uso no WhatsApp normal</b> — se estiver, tem de ser apagado dessa conta primeiro (perde-se o histórico). Tem de conseguir receber <b>SMS ou chamada</b>. Não use o telemóvel de um consultor: esses são para o WhatsApp Evolution.</>,
+    produz: 'Um número livre, capaz de receber o código' },
+  { id: 'app', titulo: 'Criar a app na Meta',
+    fazer: <>Em <code>developers.facebook.com/apps</code> → <b>Create App</b> → nome e email → caso de uso <b>&quot;Connect with customers through WhatsApp&quot;</b> → escolher ou criar o <i>business portfolio</i> da empresa.</>,
+    produz: 'A app, ligada ao portfolio da empresa' },
+  { id: 'waba', titulo: 'Ligar a WhatsApp Business Account',
+    fazer: <>Na app, <b>Start using the API</b>. No painel <b>API Setup</b>, ligar a uma WABA existente ou criar uma nova.</>,
+    produz: 'A WABA — o contentor dos números e dos templates' },
+  { id: 'verificar_numero', titulo: 'Adicionar e verificar o número',
+    fazer: <>Adicionar o número, introduzir o código recebido por SMS/chamada e definir o <b>PIN de dois passos</b>. Guarde esse PIN: é pedido em operações futuras.</>,
+    produz: 'Número verificado + Phone Number ID visível no API Setup' },
+  { id: 'nome', titulo: 'Definir o nome de apresentação',
+    fazer: <>É o nome que o cliente vê. Passa por revisão da Meta e tem de corresponder ao negócio real — um nome inventado é recusado.</>,
+    produz: 'Nome aprovado' },
+  { id: 'credenciais', titulo: 'Preencher as credenciais aqui em baixo', auto: true,
+    fazer: <>Copiar o <b>Phone Number ID</b> e um <b>access token</b> do painel API Setup para a secção <i>WhatsApp Meta</i> desta página, e Guardar. Para começar serve o token temporário (24 h).</>,
+    produz: 'Este passo fica ✓ sozinho quando os dois campos estiverem preenchidos' },
+  { id: 'teste', titulo: 'Provar que entrega', auto: true,
+    fazer: <>Usar o botão <b>Testar</b> da secção WhatsApp Meta com o seu próprio número. É o único passo que confirma que o token é válido e que a mensagem chega — o rótulo &quot;configurado&quot; só diz que os campos estão preenchidos.</>,
+    produz: 'Fica ✓ sozinho após um teste entregue' },
+  { id: 'token_permanente', titulo: 'Gerar o token permanente',
+    fazer: <>O token temporário expira em 24 h. Em <b>Business Settings</b> → criar um <b>System User</b> → atribuir-lhe a app <b>e</b> a WABA com controlo total → gerar token com <code>business_management</code>, <code>whatsapp_business_messaging</code> e <code>whatsapp_business_management</code>. Substituir o temporário aqui em baixo.</>,
+    produz: 'Token que não expira' },
+  { id: 'pagamento', titulo: 'Adicionar método de pagamento',
+    fazer: <>Sem ele não há envios reais além dos de teste. A Meta cobra por conversa <b>ao dono da WABA</b> — confirme que é a empresa certa a pagar.</>,
+    produz: 'Conta apta a enviar' },
+  { id: 'verificacao', titulo: 'Submeter a verificação do negócio',
+    fazer: <>Documentos legais da empresa. Enquanto não estiver feita, os limites de envio são baixos. É a etapa mais demorada — submeta cedo.</>,
+    produz: 'Limites de produção' },
+  { id: 'templates', titulo: 'Aprovar templates',
+    fazer: <>Só se pode enviar <b>texto livre nas 24 h seguintes a uma mensagem do cliente</b>. Fora dessa janela, apenas templates aprovados — necessários para campanhas e primeiros contactos. Envie-nos os textos e nós submetemo-los por API.</>,
+    produz: 'Capacidade de iniciar conversa' },
+  { id: 'ativar', titulo: 'Ativar o canal', auto: true,
+    fazer: <>Na tab <b>Comunicação</b>, ligar o interruptor do cartão <i>WhatsApp (Meta)</i>. Até lá a plataforma enfileira mas não entrega.</>,
+    produz: 'Fica ✓ sozinho quando o canal estiver ativo' },
+];
+
+function AssistenteMeta({ credenciaisOk, canalAtivo }: { credenciaisOk: boolean; canalAtivo: boolean }) {
+  const { data, mutate } = useSWR<{ dados: Record<string, boolean> }>('/api/settings/setup/whatsapp_meta', api);
+  const [aberto, setAberto] = useState<string | null>(null);
+  const guardados = data?.dados ?? {};
+
+  // Verdade derivada > visto manual: um passo verificável nunca depende de alguém
+  // se lembrar de o marcar, nem pode ser marcado à mão quando não está feito.
+  const feito = (p: Passo): boolean => {
+    if (p.id === 'credenciais') return credenciaisOk;
+    if (p.id === 'ativar') return canalAtivo;
+    return !!guardados[p.id];
+  };
+  const concluidos = PASSOS_META.filter(feito).length;
+  const pct = Math.round((concluidos / PASSOS_META.length) * 100);
+
+  async function alternar(p: Passo) {
+    if (p.auto) return;
+    const novos = { ...guardados, [p.id]: !guardados[p.id] };
+    mutate({ dados: novos }, false);
+    try { await api('/api/settings/setup/whatsapp_meta', { method: 'PUT', body: JSON.stringify({ dados: novos }) }); }
+    finally { mutate(); }
+  }
+
+  return (
+    <div className="card space-y-4">
+      <div>
+        <div className="flex items-baseline justify-between gap-3">
+          <h3 className="text-sm font-semibold text-ink-900">Assistente de configuração — WhatsApp Meta</h3>
+          <span className="shrink-0 text-sm font-semibold text-ink-700">{pct}%</span>
+        </div>
+        <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-ink-100" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+          <div className="h-full rounded-full bg-[color:var(--accent)] transition-all duration-500" style={{ width: `${pct}%` }} />
+        </div>
+        <p className="mt-1.5 text-xs text-ink-400">{concluidos} de {PASSOS_META.length} passos · os assinalados com ✓ automático são verificados pela plataforma</p>
+      </div>
+
+      <ol className="divide-y divide-ink-100 rounded-lg border border-ink-100">
+        {PASSOS_META.map((p, i) => {
+          const ok = feito(p);
+          const expandido = aberto === p.id;
+          return (
+            <li key={p.id}>
+              <div className="flex items-start gap-3 px-3 py-2.5">
+                <button
+                  type="button" onClick={() => alternar(p)} disabled={p.auto}
+                  title={p.auto ? 'Verificado automaticamente pela plataforma' : ok ? 'Marcar como por fazer' : 'Marcar como feito'}
+                  className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-xs font-bold ${
+                    ok ? 'border-green-600 bg-green-600 text-white' : 'border-ink-300 text-transparent'
+                  } ${p.auto ? 'cursor-default opacity-90' : 'hover:border-ink-500'}`}
+                >✓</button>
+                <button type="button" onClick={() => setAberto(expandido ? null : p.id)} className="min-w-0 flex-1 text-left">
+                  <span className={`block text-sm ${ok ? 'text-ink-400 line-through' : 'text-ink-900'}`}>
+                    <span className="text-ink-400">{i + 1}.</span> {p.titulo}
+                    {p.auto && <span className="ml-2 rounded bg-ink-100 px-1.5 py-0.5 text-[10px] font-medium text-ink-500 no-underline">automático</span>}
+                  </span>
+                  {expandido && (
+                    <span className="mt-2 block space-y-1.5">
+                      <span className="block text-xs leading-relaxed text-ink-600">{p.fazer}</span>
+                      {p.produz && <span className="block text-xs text-ink-400">→ {p.produz}</span>}
+                    </span>
+                  )}
+                </button>
+                <span className="shrink-0 text-xs text-ink-300">{expandido ? '−' : '+'}</span>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 function CredenciaisTab() {
   const { data, mutate } = useSWR<MCSettings>('/api/messaging/settings', api);
+  const { data: cfgCanais } = useSWR<{ config: CanalCfg[] }>('/api/messaging/config', api);
+  const { mutate: revalidar } = useSWRConfig();
+
+  // O passo "provar que entrega" do assistente não é um visto: é a consequência de
+  // uma entrega mesmo confirmada pelo botão Testar.
+  async function registarTesteMeta() {
+    const chave = '/api/settings/setup/whatsapp_meta';
+    try {
+      const atual = await api<{ dados: Record<string, boolean> }>(chave);
+      await api(chave, { method: 'PUT', body: JSON.stringify({ dados: { ...(atual.dados ?? {}), teste: true } }) });
+      revalidar(chave);
+    } catch { /* o teste passou; falhar a registar o progresso não é motivo de alarme */ }
+  }
   const [f, setF] = useState<Record<string, string>>({});
   const [segredos, setSegredos] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<string | null>(null);
@@ -786,9 +920,11 @@ function CredenciaisTab() {
 
   if (!data) return <p className="text-sm text-ink-400">A carregar …</p>;
   const ch = data._channels ?? {};
+  const metaAtivo = !!(cfgCanais?.config ?? []).find((c) => c.canal === 'whatsapp_meta')?.ativo;
 
   return (
     <div className="space-y-4">
+      <AssistenteMeta credenciaisOk={!!ch.whatsapp_meta} canalAtivo={metaAtivo} />
       <p className="text-sm text-ink-400">
         Credenciais de cada canal. O que gravar aqui <b>sobrepõe-se</b> ao <code>.env</code> do servidor;
         um campo vazio cai para o valor do <code>.env</code>. Um canal só entrega depois de ter
@@ -824,7 +960,7 @@ function CredenciaisTab() {
                  valor={segredos.meta_wa_access_token ?? ''}
                  onChange={(v) => setSegredos({ ...segredos, meta_wa_access_token: v })}
                  onLimpar={() => setSegredos({ ...segredos, meta_wa_access_token: '' })} />
-        <TesteCanal canal="whatsapp_meta" placeholder="351XXXXXXXXX" />
+        <TesteCanal canal="whatsapp_meta" placeholder="351XXXXXXXXX" onSucesso={registarTesteMeta} />
       </div>
 
       <div className="card space-y-3">
