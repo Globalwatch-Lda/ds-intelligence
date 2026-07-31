@@ -32,6 +32,18 @@ const PAGE_CAP: Record<string, string> = {
 
 // Inline chat-bubble icon for the WhatsApp nav item (avoids depending on a
 // package icon export).
+// Documento com lupa. O pacote UI não traz ícone para isto e a Análise Documental
+// estava a partilhar o IconReport com o Recap — duas entradas do menu visualmente
+// iguais, que é o mesmo que não ter ícone. Mesmo padrão do IconWhatsApp: SVG local.
+const IconDocScan = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4" />
+    <path d="M13 3l4 4v3" />
+    <circle cx="16" cy="15" r="3.5" />
+    <path d="m18.6 17.6 2.4 2.4" />
+  </svg>
+);
+
 const IconWhatsApp = (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.9-.9L3 21l1.9-5.6a8.5 8.5 0 0 1-.9-3.9A8.38 8.38 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5z" />
@@ -61,7 +73,7 @@ const config: SynertiaConfig = {
     { href: '/newsletter', label: 'Newsletter', icon: <IconNewsletter /> },
     { href: '/whatsapp', label: 'WhatsApp', icon: IconWhatsApp },
     { href: '/recap', label: 'Recap semanal', icon: <IconReport /> },
-    { href: '/analise-documental', label: 'Análise documental', icon: <IconReport /> },
+    { href: '/analise-documental', label: 'Análise documental', icon: IconDocScan },
   ],
   liveLink: { href: '/clientes-live', label: 'CRM em direto' },
   fullWidthRoutes: ['/dashboard'],
