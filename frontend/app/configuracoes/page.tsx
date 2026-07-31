@@ -781,8 +781,13 @@ function ModulosTab() {
             <span className="mt-0.5 block text-xs text-ink-400">Email · SMS · WhatsApp Meta · WhatsApp Evolution</span>
           </span>
         </label>
-        <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${m?.installed ? 'bg-green-100 text-green-700' : 'bg-ink-100 text-ink-400'}`}>
-          {m?.installed ? `instalado v${m.installed_version ?? m.available_version}` : m ? `disponível v${m.available_version}` : '…'}
+        {/* O rótulo mostra a versão A CORRER (available_version), que é a que governa
+            o comportamento. A `installed_version` é só um carimbo do momento em que as
+            tabelas foram semeadas e fica para trás a cada atualização do módulo —
+            mostrá-la aqui fazia parecer que a plataforma estava desatualizada. */}
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${m?.installed ? 'bg-green-100 text-green-700' : 'bg-ink-100 text-ink-400'}`}
+              title={m?.installed_version ? `Instalado na v${m.installed_version}` : undefined}>
+          {m?.installed ? `instalado v${m.available_version}` : m ? `disponível v${m.available_version}` : '…'}
         </span>
       </div>
 
