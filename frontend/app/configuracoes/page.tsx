@@ -583,7 +583,15 @@ function EquipasTab() {
 type CanalCfg = { canal: string; ativo: boolean; batch_size: number; intervalo_segundos: number; cap_diario: number; remetente: string | null };
 type QueueResp = { pendentes: number; enviados: number; falhados: number; recent: { id: number; canal: string; destinatario: string; status: string; ref_tipo: string | null }[] };
 
-const CANAL_LABEL: Record<string, string> = { email: 'Email', sms: 'SMS', whatsapp_evolution: 'WhatsApp (Evolution)' };
+const CANAL_LABEL: Record<string, string> = {
+  email: 'Email', sms: 'SMS',
+  whatsapp_meta: 'WhatsApp (Meta)', whatsapp_evolution: 'WhatsApp (Evolution)',
+};
+// Os dois canais WhatsApp são independentes e podem estar ativos ao mesmo tempo.
+const CANAL_NOTA: Record<string, string> = {
+  whatsapp_meta: 'Número oficial da loja, via Meta Cloud API. Fora da janela de 24h só entrega templates aprovados.',
+  whatsapp_evolution: 'Número próprio de cada consultor, ligado por QR code na página WhatsApp.',
+};
 
 function CanalCard({ cfg, onSaved }: { cfg: CanalCfg; onSaved: () => void }) {
   const [f, setF] = useState<CanalCfg>(cfg);
@@ -607,9 +615,12 @@ function CanalCard({ cfg, onSaved }: { cfg: CanalCfg; onSaved: () => void }) {
 
   return (
     <div className="card space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-ink-900">{CANAL_LABEL[f.canal] ?? f.canal}</h3>
-        <label className="flex items-center gap-2 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-ink-900">{CANAL_LABEL[f.canal] ?? f.canal}</h3>
+          {CANAL_NOTA[f.canal] && <p className="mt-0.5 text-xs text-ink-400">{CANAL_NOTA[f.canal]}</p>}
+        </div>
+        <label className="flex shrink-0 items-center gap-2 text-sm">
           <input type="checkbox" checked={f.ativo} onChange={(e) => setF({ ...f, ativo: e.target.checked })} className="h-4 w-4 accent-[color:var(--accent)]" />
           {f.ativo ? 'Ativo' : 'Inativo'}
         </label>
@@ -643,7 +654,8 @@ function ComunicacaoTab() {
   return (
     <div className="space-y-6">
       <p className="text-sm text-ink-400">
-        Canais de comunicação da plataforma (Email, SMS e WhatsApp). Os limites de lote e o intervalo
+        Canais de comunicação da plataforma (Email, SMS e os dois WhatsApp — Meta e Evolution,
+        independentes um do outro). Os limites de lote e o intervalo
         entre lotes espaçam os envios para não disparar alarmes anti-spam. Um canal inativo (ou sem
         serviço configurado no servidor) enfileira mas não entrega.
       </p>
@@ -666,10 +678,13 @@ type ModuleState = {
   id: string; label: string; installed: boolean; locked: boolean;
   installed_version: string | null; available_version: string; channels: string[];
 };
-const INSTALL_CANAIS: { key: string; label: string }[] = [
+// As chaves vão tal e qual para POST /module/install. Os dois canais WhatsApp são
+// independentes: instalar/ativar um não mexe no outro, e podem correr em paralelo.
+const INSTALL_CANAIS: { key: string; label: string; nota?: string }[] = [
   { key: 'email', label: 'Email (AWS SES)' },
   { key: 'sms', label: 'SMS (AWS SNS)' },
-  { key: 'whatsapp', label: 'WhatsApp (Evolution)' },
+  { key: 'whatsapp_meta', label: 'WhatsApp Meta (Cloud API)', nota: 'Número oficial da loja' },
+  { key: 'whatsapp_evolution', label: 'WhatsApp Evolution', nota: 'Número próprio de cada consultor' },
 ];
 
 function InstallModuleDialog({
@@ -691,12 +706,15 @@ function InstallModuleDialog({
           <h2 className="text-sm font-semibold">Instalar Comunicação Multicanal <span className="text-ink-400">v{version}</span></h2>
         </div>
         <div className="space-y-4 px-4 py-4">
-          <p className="text-sm text-ink-500">Escolha os canais a instalar. Ficam desligados até os ativar na tab Comunicação.</p>
+          <p className="text-sm text-ink-500">Escolha os canais a instalar. Ficam desligados até os ativar na tab Comunicação. Pode voltar aqui mais tarde para <b>acrescentar</b> canais.</p>
           <div className="space-y-1.5">
             {INSTALL_CANAIS.map((c) => (
-              <label key={c.key} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-ink-50">
-                <input type="checkbox" checked={sel.has(c.key)} onChange={() => toggle(c.key)} className="h-4 w-4 accent-[color:var(--accent)]" />
-                <span className="text-ink-800">{c.label}</span>
+              <label key={c.key} className="flex items-start gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-ink-50">
+                <input type="checkbox" checked={sel.has(c.key)} onChange={() => toggle(c.key)} className="mt-0.5 h-4 w-4 shrink-0 accent-[color:var(--accent)]" />
+                <span>
+                  <span className="block text-ink-800">{c.label}</span>
+                  {c.nota && <span className="block text-xs text-ink-400">{c.nota}</span>}
+                </span>
               </label>
             ))}
           </div>
@@ -752,7 +770,7 @@ function ModulosTab() {
           />
           <span className="min-w-0">
             <span className="block font-medium text-ink-900">Comunicação Multicanal</span>
-            <span className="mt-0.5 block text-xs text-ink-400">Email · SMS · WhatsApp (Evolution)</span>
+            <span className="mt-0.5 block text-xs text-ink-400">Email · SMS · WhatsApp Meta · WhatsApp Evolution</span>
           </span>
         </label>
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${m?.installed ? 'bg-green-100 text-green-700' : 'bg-ink-100 text-ink-400'}`}>

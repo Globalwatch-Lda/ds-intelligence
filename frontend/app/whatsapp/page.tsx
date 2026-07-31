@@ -4,13 +4,20 @@ import useSWR from 'swr';
 import { api } from '../../lib/api';
 import { useMe } from '../../lib/useMe';
 
-type Status = { configured: boolean; instance: string | null; connected: boolean; state: string | null; profile_name?: string | null; numero?: string | null };
+type Status = { configured: boolean; instance: string | null; connected: boolean; state: string | null; erro?: string | null; profile_name?: string | null; numero?: string | null };
 type ConnectResp = { configured: boolean; instance: string; qr: string | null; code: string | null };
 type Template = { id: number; nome: string; categoria: string | null; corpo: string; ativo: boolean };
 type HistMsg = { id: number; destinatario: string; corpo: string; status: string; agendado_para: string | null; enviado_em: string | null; erro: string | null };
 type Cliente = { crm_id: number; nome: string | null; telefone: string | null };
 
 function qrSrc(qr: string) { return qr.startsWith('data:') ? qr : `data:image/png;base64,${qr}`; }
+// `api()` throws "API <path> → <status>: <body>"; o corpo é o JSON do FastAPI.
+// Extrai o `detail` para o utilizador ler a causa em vez do envelope todo.
+function errMsg(e: any): string {
+  const raw = String(e?.message ?? e ?? '');
+  const body = raw.slice(raw.indexOf(': ') + 2);
+  try { return JSON.parse(body)?.detail || raw; } catch { return raw; }
+}
 function resolve(text: string, cliente: string, consultor: string) {
   return text.split('{{nome_cliente}}').join(cliente || '').split('{{nome_consultor}}').join(consultor || '');
 }
@@ -29,7 +36,7 @@ function ConnectCard({ status, onChange }: { status: Status; onChange: () => voi
     try {
       const r = await api<ConnectResp>('/api/messaging/whatsapp/connect', { method: 'POST' });
       setQr(r.qr); setCode(r.code); onChange();
-    } catch (e: any) { setErr(e.message?.includes('não está configurado') ? 'Serviço WhatsApp não configurado no servidor.' : `Erro: ${e.message}`); }
+    } catch (e: any) { setErr(errMsg(e)); }
     finally { setBusy(false); }
   }
 
@@ -48,7 +55,13 @@ function ConnectCard({ status, onChange }: { status: Status; onChange: () => voi
         </div>
       )}
       {!qr && code && <p className="text-sm text-ink-600">Código de emparelhamento: <b>{code}</b></p>}
-      {err && <p className="text-sm text-ds-700">{err}</p>}
+      {(err || status.erro) && (
+        <div className="rounded-lg border border-ds-200 bg-ds-50 px-3 py-2">
+          <p className="text-sm font-medium text-ds-700">Não foi possível gerar o QR.</p>
+          <p className="mt-1 break-words text-xs text-ds-700/80">{err || status.erro}</p>
+          <p className="mt-1 text-xs text-ink-500">O serviço Evolution não respondeu — é uma questão de servidor, não do seu telemóvel. Avise o suporte.</p>
+        </div>
+      )}
     </div>
   );
 }

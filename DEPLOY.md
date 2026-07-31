@@ -15,38 +15,76 @@ manual, and how to fix it when something breaks.
 
 ## 1. Infrastructure at a glance
 
-> ⚠️ **Infra atual (verificada 2026-06-30)** — a migração para o box novo + projeto
-> Supabase novo deixou esta tabela desatualizada; valores corretos abaixo.
+> ⚠️ **A plataforma saiu da AWS.** Corre em **Hetzner** desde julho de 2026 (verificado
+> 2026-07-31). A box EC2 `108.130.14.101` ainda existe com uma cópia da app, mas **o DNS
+> já não lhe aponta** — mexer lá não produz efeito nenhum em produção.
 
 | Thing | Value |
 |---|---|
-| Platform URL | https://dscredito.synertia-gw.ai |
-| EC2 | `i-09791c4600bef70ea`, eu-west-1, **108.130.14.101**, user `ubuntu` |
-| SSH | `ssh -i ~/.ssh/dscredito-key.pem ubuntu@108.130.14.101` |
-| Backend | FastAPI em `~/ds-engine/backend`, venv `~/ds-engine/backend/venv`, systemd `ds-intelligence.service` |
-| Frontend | Next.js, systemd `ds-intelligence-frontend.service` |
-| Staging | `~/ds-engine-staging` (branch `staging`); ver memória/`deploy-staging.sh` |
-| DB | Supabase ref **`bsxnzxroxcjtgtvqozgo`**, schema `ds` (ligação DDL: `cred/ddl.txt`, gitignored) |
-| Deploy | git-based: push a `origin/main`, depois `ssh … 'cd ~/ds-engine && ./deploy.sh'` |
+| Platform URL | https://dscredito.synertia-gw.ai (Loulé: https://dsloule.synertia-gw.ai) |
+| Servidor | Hetzner **`app-dscredito`**, IP **2.28.6.0** (também IPv6). Três apps na mesma box. |
+| SSH | `ssh -i <repo synertia-vox-v2>/ignore/synertia-provision root@2.28.6.0` — os serviços correm como `ubuntu` |
+| Backend | FastAPI/uvicorn, venv em `<checkout>/backend/venv` |
+| Frontend | Next.js (systemd) |
+| DB | Supabase ref **`bsxnzxroxcjtgtvqozgo`** — schema `ds` (Ramada) e `dsl` (Loulé), via `DB_SCHEMA`. Ligação DDL em `cred/ddl.txt` (gitignored) |
+| Web server | **nginx** + Let's Encrypt/Certbot, proxy para as portas locais (o Caddy está inativo nesta box) |
+| LLM | chave Anthropic dedicada da DS (`ANTHROPIC_API_KEY` no `.env`) |
+| WhatsApp Meta | app Meta dedicada da DS (System User token, sem expiração) — `META_WA_*` |
+| WhatsApp Evolution | servidor **no assist** (Hetzner 2.28.1.254), alcançado por túnel SSH — ver §1.2 |
 
-**Deploy rápido (runbook):**
-1. `git push origin main`.
-2. Novas env vars → acrescentar **à mão** em `~/ds-engine/backend/.env` no box (o deploy nunca lhes toca).
-3. `ssh -i ~/.ssh/dscredito-key.pem ubuntu@108.130.14.101 'cd ~/ds-engine && ./deploy.sh'`.
-4. Migrações (se houver): `DB_URL="$(cat cred/ddl.txt)" python scripts/apply_migrations.py` (local, contra a prod; idempotente).
-| Web server | nginx + Let's Encrypt; proxies only `/api/*` → FastAPI (note: `/health` is not exposed publicly) |
-| LLM | dedicated DS Anthropic key (`ANTHROPIC_API_KEY` in `.env`) |
-| WhatsApp | dedicated DS Meta app (System User token, no expiry) |
+### 1.1 As três instalações na box
 
-All secrets live in `~/ds-engine/backend/.env` on the box (gitignored). The same
-`.env` powers both the API and the sync workers.
+| App | Checkout | Branch | systemd (API / frontend) | Portas | Domínio |
+|---|---|---|---|---|---|
+| **Prod Ramada** | `~/ds-engine` | `main` | `ds-intelligence` / `ds-intelligence-frontend` | 8005 / 3005 | dscredito.synertia-gw.ai |
+| **Staging** | `~/ds-engine-staging` | `staging` | `ds-intelligence-staging` / `ds-intelligence-frontend-staging` | 8006 / 3006 | sem domínio (`server_name _`, só por IP) |
+| **Loulé** | `~/ds-engine-loule` | `main` | `ds-loule` / `ds-loule-frontend` | 8007 / 3007 | dsloule.synertia-gw.ai |
+
+Prod e Loulé correm o **mesmo branch `main`** e separam-se por `.env` (`DB_SCHEMA`,
+`LOJA_NAME`, `EVOLUTION_INSTANCE_PREFIX`). Uma alteração em `main` chega às duas.
+
+### 1.2 Evolution (WhatsApp por consultor) — não vive nesta box
+O Evolution API corre no servidor **assist** (`2.28.1.254`, `/opt/evolution`, docker
+compose), a escutar **só em `127.0.0.1:8088`**. A box da app chega lá por
+`evolution-tunnel.service` (systemd, `enabled`, `Restart=always`), que mantém
+`127.0.0.1:8088 → assist:8088`; por isso `EVOLUTION_API_URL=http://127.0.0.1:8088`
+nos `.env`. A chave SSH do túnel (`~ubuntu/.ssh/evolution-tunnel`) é **dedicada** e no
+assist só pode abrir aquele porto (user `evotunnel`, `permitopen`) — a
+`synertia-provision` não está nesta box de propósito.
+
+Se o QR deixar de aparecer: `systemctl status evolution-tunnel` na box da app e
+`docker ps` no assist, por esta ordem.
+
+## 1.3 Deploy — é AUTOMÁTICO, a cada 2 minutos
+
+⚠️ **Não há passo manual.** `auto-deploy.sh` corre no cron de 2 em 2 minutos em prod
+**e** em Loulé: se `origin/main` mexeu, corre o `deploy.sh` (reset hard a origin/main,
+pip install, build do Next, restart dos serviços). **`git push origin main` = live em
+~2 min nas duas lojas.** Não empurrar para `main` trabalho por validar.
+
+- Log: `~/ds-autodeploy.log` (Loulé: o `auto-deploy.sh` do próprio checkout).
+- Staging: branch `staging`, `deploy-staging.sh`.
+- Novas env vars → à mão em `<checkout>/backend/.env` (o deploy nunca lhes toca) + restart.
+- Migrações: `DB_URL="$(cat cred/ddl.txt)" python scripts/apply_migrations.py` (local, idempotente).
+
+⚠️ **O módulo `synertia-multicanal` NÃO entra no auto-deploy.** É um checkout git à parte
+em `<checkout>/backend/multicanal` (repo `Globalwatch-Lda/synertia-multicanal`, gitignored
+aqui) e o `deploy.sh` não lhe toca. Atualizar à mão, por instalação:
+```
+cd ~/ds-engine/backend/multicanal && git pull --ff-only origin main && cat VERSION
+sudo systemctl restart ds-intelligence      # e ds-loule para o checkout de Loulé
+```
+A versão a correr aparece na tab *Módulos* (available_version).
+
+Todos os segredos vivem no `.env` de cada checkout (gitignored). O mesmo `.env` serve
+a API e os workers de sincronização.
 
 ---
 
-## 2. What runs automatically (cron on the EC2 box, user `ubuntu`)
+## 2. What runs automatically (cron na box Hetzner, user `ubuntu`)
 
-Installed 2 June 2026. `crontab -l` to view. Times are **UTC** (02:00 UTC =
-03:00 Europe/Lisbon in summer). Logs append to `~/ds-sync.log`.
+`crontab -u ubuntu -l` para ver. Horas em **UTC** (02:00 UTC = 03:00 Europe/Lisbon no
+verão). Logs: `~/ds-sync.log` (Ramada) e `~/dsl-sync.log` (Loulé).
 
 | When (UTC) | Job |
 |---|---|
@@ -54,6 +92,9 @@ Installed 2 June 2026. `crontab -l` to view. Times are **UTC** (02:00 UTC =
 | 02:20 daily | `ingest_processos.py` — refresh `ds.processos_real` (~187) |
 | 02:40 daily | `ingest_leads.py` — refresh `ds.leads_real` (~420) |
 | 03:00 Monday | `ingest_consent.py --stale-days 7` — refresh marketing-consent on `clientes_real` |
+| 03:10 / 03:30 / 03:50 / 04:10 Mon | os mesmos quatro para **Loulé** (`~/ds-engine-loule`, schema `dsl`) |
+| cada minuto | `run_dispatcher.py` — fila de envios multicanal (um por loja; logs `~/ds-dispatch.log`, `~/dsl-dispatch.log`) |
+| cada 2 min | `auto-deploy.sh` — ver §1.3 |
 
 Each worker self-mints a fresh CrediDesk JWT via **headless Chromium**
 (`integrations/ds_crm/auth.py` drives the login form), so there is no manual
@@ -69,8 +110,9 @@ decision — don't wire it without their sign-off.
 ## 3. Manual re-sync (run any time, e.g. before a demo)
 
 ```bash
-ssh -i ~/.ssh/ds-intelligence-key.pem ubuntu@52.48.160.156
-cd ~/ds-engine/backend
+ssh -i <repo synertia-vox-v2>/ignore/synertia-provision root@2.28.6.0
+sudo -iu ubuntu           # os workers correm como ubuntu
+cd ~/ds-engine/backend    # (ou ~/ds-engine-loule/backend para Loulé)
 venv/bin/python integrations/ds_crm/ingest_customers.py
 venv/bin/python integrations/ds_crm/ingest_processos.py
 venv/bin/python integrations/ds_crm/ingest_leads.py
@@ -195,6 +237,11 @@ consent fields. Full table in `reference_ds_crm_credidesk` (Karim's notes).
 ---
 
 ## 11. In-app login (item 1) — deploy steps
+
+> 📌 **Histórico** — já executado há muito. Os caminhos nginx aqui citados são os da
+> antiga box AWS (`sites-available/ds-intelligence`); na Hetzner os sites são
+> `sites-enabled/dscredito`, `dscredito-staging` e `dsloule`. Ler pelas variáveis e
+> pela ordem das operações, não pelos caminhos.
 
 The platform now authenticates itself with an in-app login screen instead of the
 nginx HTTP basic-auth popup. This needs THREE production actions — do them in
