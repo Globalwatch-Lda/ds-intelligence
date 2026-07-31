@@ -14,6 +14,17 @@ git reset --hard origin/main
 echo "→ backend deps"
 backend/venv/bin/pip install -q -r backend/requirements.txt
 
+# O JWT do CrediDesk é mintado por Chromium headless (integrations/ds_crm/auth.py),
+# e o browser NÃO vem no pip — vive em ~/.cache/ms-playwright. A migração para a
+# Hetzner deixou-o para trás e as três ingestões noturnas falharam durante dois dias
+# sem ninguém dar por isso. É barato garanti-lo aqui: quando já existe, sai num
+# instante. Não bloqueia o deploy se falhar — a app serve na mesma, só a ingestão é
+# que precisa dele. (As bibliotecas de sistema instalam-se uma vez, à parte:
+#  venv/bin/python -m playwright install-deps chromium, com root.)
+echo "→ browser do Playwright (mint do JWT do CRM)"
+backend/venv/bin/python -m playwright install chromium >/dev/null 2>&1 || \
+  echo "  ⚠ não foi possível garantir o Chromium — a sincronização do CRM pode falhar"
+
 echo "→ frontend build"
 # Injeta o short SHA no build para o rótulo de versão (NEXT_PUBLIC_BUILD_SHA).
 SHA="$(git rev-parse --short=7 HEAD)"
