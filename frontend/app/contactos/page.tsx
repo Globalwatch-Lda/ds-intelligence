@@ -81,15 +81,20 @@ export default function ContactosPage() {
     setPreview(r);
   }
 
-  async function confirmSend() {
+  async function confirmSend(imediato = false) {
     if (!selectedId) return;
     setSending(true);
     try {
-      const r = await api<{ enqueued: number; total: number; por_numero_proprio: boolean }>('/api/broadcasts/send', {
+      const r = await api<{ enqueued: number; total: number; por_numero_proprio: boolean; entregue: boolean | null; erro_entrega: string | null }>('/api/broadcasts/send', {
         method: 'POST',
-        body: JSON.stringify({ consultor_id: selectedId, tipo, template: tipo === 'custom' ? customMsg : welcomeMsg || null, destinatarios }),
+        body: JSON.stringify({ consultor_id: selectedId, tipo, template: tipo === 'custom' ? customMsg : welcomeMsg || null, destinatarios, imediato }),
       });
-      setStatus(`✓ ${r.enqueued} mensagem(ns) em fila — entrega faseada ${r.por_numero_proprio ? 'pelo número do próprio consultor' : 'pelo número do operador'}.`);
+      const numero = r.por_numero_proprio ? 'pelo número do próprio consultor' : 'pelo número do operador';
+      setStatus(
+        r.entregue ? `✓ Mensagem entregue ${numero}.`
+        : r.erro_entrega ? `Ficou em fila: não foi possível entregar agora (${r.erro_entrega}).`
+        : `✓ ${r.enqueued} mensagem(ns) em fila — entrega faseada ${numero}.`,
+      );
       setPreview(null); setSelected(new Set());
     } catch (e: any) { setStatus(`Erro: ${e.message}`); } finally { setSending(false); }
   }
@@ -235,10 +240,26 @@ export default function ContactosPage() {
               <button onClick={() => setPreview(null)} className="text-2xl leading-none text-ink-400 hover:text-ds-600">×</button>
             </div>
             <div className="mb-4 whitespace-pre-wrap rounded-xl bg-ink-50 p-4 text-sm text-ink-900">{preview.sample_message}</div>
-            <div className="mb-4 rounded-lg bg-ink-50 px-3 py-2 text-xs text-ink-500">ℹ️ Envio faseado via WhatsApp {preview.por_numero_proprio ? 'pelo número do próprio consultor' : 'pelo número do operador'}. Respeita os limites de lote/intervalo.</div>
-            <div className="flex justify-end gap-2">
+            {preview.n_contactos === 1 ? (
+              <div className="mb-4 rounded-lg bg-ink-50 px-3 py-2 text-xs text-ink-500">
+                ℹ️ Um único destinatário, {preview.por_numero_proprio ? 'pelo número do próprio consultor' : 'pelo número do operador'}.
+                <b> Enviar já</b> entrega na hora; <b>pôr em fila</b> deixa a mensagem para o próximo ciclo (até 1 min).
+              </div>
+            ) : (
+              <div className="mb-4 rounded-lg bg-ink-50 px-3 py-2 text-xs text-ink-500">ℹ️ Envio faseado via WhatsApp {preview.por_numero_proprio ? 'pelo número do próprio consultor' : 'pelo número do operador'}. Respeita os limites de lote/intervalo.</div>
+            )}
+            <div className="flex flex-wrap justify-end gap-2">
               <button onClick={() => setPreview(null)} className="btn-ghost">Cancelar</button>
-              <button onClick={confirmSend} disabled={sending} className="btn-primary">{sending ? 'A enviar …' : `Enviar para ${preview.n_contactos}`}</button>
+              {/* A escolha só aparece com UM destinatário: em massa, o espaçamento em
+                  lotes é o que protege o número dos alarmes anti-spam do WhatsApp. */}
+              {preview.n_contactos === 1 ? (
+                <>
+                  <button onClick={() => confirmSend(false)} disabled={sending} className="btn-ghost">{sending ? 'A processar …' : 'Pôr em fila'}</button>
+                  <button onClick={() => confirmSend(true)} disabled={sending} className="btn-primary">{sending ? 'A enviar …' : 'Enviar já'}</button>
+                </>
+              ) : (
+                <button onClick={() => confirmSend(false)} disabled={sending} className="btn-primary">{sending ? 'A enviar …' : `Enviar para ${preview.n_contactos}`}</button>
+              )}
             </div>
           </div>
         </div>

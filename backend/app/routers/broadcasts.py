@@ -16,7 +16,8 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from pydantic import BaseModel
 
 from ..config import settings
-from ..core.dispatcher import enqueue_many
+from ..multicanal_ctx import build_ctx
+from synertia_multicanal.dispatcher import enqueue_many, send_pending_now
 from ..core.evolution import instance_name_for
 from ..core.names import fix_name
 from ..db import supabase
@@ -206,6 +207,7 @@ class BroadcastBody(BaseModel):
     tipo: Literal["welcome", "custom"] = "welcome"
     template: str | None = None
     destinatarios: list[dict] | None = None  # [{nome_cliente, telefone}]; vazio/None = todos
+    imediato: bool = False  # só honrado com UM destinatário — ver send_broadcast
 
 
 @router.post("/preview")
@@ -254,15 +256,30 @@ def send_broadcast(body: BroadcastBody, request: Request):
         if dest:
             itens.append({"destinatario": dest, "corpo": _render(template, nome_consultor, c["nome_cliente"])})
 
+    ctx = build_ctx()
     r = enqueue_many(
-        "whatsapp_evolution", itens,
+        ctx, "whatsapp_evolution", itens,
         ref_tipo=body.tipo, ref_id=body.consultor_id, criado_por=user, canal_conta=instance,
     )
+    # Entrega imediata SÓ com um destinatário. Em massa, o espaçamento em lotes é o
+    # que evita os alarmes anti-spam do WhatsApp — atropelá-lo põe o número em risco.
+    # Numa mensagem única não há lote nenhum a espaçar, e esperar pelo tique do
+    # worker (até 60s) lê-se como avaria.
+    entregue = None
+    erro_entrega = None
+    if body.imediato and len(itens) == 1 and r.get("ids"):
+        res = send_pending_now(ctx, r["ids"][0])
+        entregue = bool(res.get("delivered"))
+        erro_entrega = res.get("error") or res.get("skipped")
     sb.table("broadcasts").insert({
         "consultor_id": body.consultor_id, "tipo": body.tipo, "template": template,
         "destinatarios_count": r["enqueued"], "enviado_em": datetime.now(timezone.utc).isoformat(),
     }).execute()
-    return {"consultor_nome": nome_consultor, "enqueued": r["enqueued"], "total": len(contactos), "por_numero_proprio": bool(instance)}
+    return {
+        "consultor_nome": nome_consultor, "enqueued": r["enqueued"], "total": len(contactos),
+        "por_numero_proprio": bool(instance),
+        "entregue": entregue, "erro_entrega": erro_entrega,
+    }
 
 
 @router.get("/history")
