@@ -698,12 +698,14 @@ type MCSettings = {
   _channels: Record<string, boolean>;
 };
 
-function Estado({ ok }: { ok: boolean }) {
-  return (
-    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${ok ? 'bg-green-100 text-green-700' : 'bg-ink-100 text-ink-500'}`}>
-      {ok ? 'configurado' : 'por configurar'}
-    </span>
-  );
+function Estado({ ok, ativo }: { ok: boolean; ativo?: boolean }) {
+  // Três estados, não dois. Um canal com credenciais mas DESLIGADO não entrega
+  // nada — mostrar só "configurado" fazia parecer que estava operacional.
+  const [texto, cor] =
+    !ok ? ['por configurar', 'bg-ink-100 text-ink-500']
+    : ativo ? ['configurado · ativo', 'bg-green-100 text-green-700']
+    : ['configurado · desligado', 'bg-amber-100 text-amber-700'];
+  return <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${cor}`}>{texto}</span>;
 }
 
 function Segredo({
@@ -924,7 +926,9 @@ function CredenciaisTab() {
 
   if (!data) return <p className="text-sm text-ink-400">A carregar …</p>;
   const ch = data._channels ?? {};
-  const metaAtivo = !!(cfgCanais?.config ?? []).find((c) => c.canal === 'whatsapp_meta')?.ativo;
+  const ativos: Record<string, boolean> = Object.fromEntries((cfgCanais?.config ?? []).map((c) => [c.canal, c.ativo]));
+  const metaAtivo = !!ativos.whatsapp_meta;
+  const desligados = ['email', 'sms', 'whatsapp_meta', 'whatsapp_evolution'].filter((c) => ch[c] && !ativos[c]);
 
   return (
     <div className="space-y-4">
@@ -934,9 +938,16 @@ function CredenciaisTab() {
         um campo vazio cai para o valor do <code>.env</code>. Um canal só entrega depois de ter
         credenciais <b>e</b> de ser ativado na tab Comunicação.
       </p>
+      {desligados.length > 0 && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <b>{desligados.length === 1 ? 'Um canal está' : `${desligados.length} canais estão`} configurado{desligados.length === 1 ? '' : 's'} mas desligado{desligados.length === 1 ? '' : 's'}</b> — não entregam nada.
+          O botão <b>Testar</b> ignora o interruptor de propósito, para se poder validar as credenciais antes de ligar o canal a sério.
+          Ligue-os na tab <b>Comunicação</b>.
+        </p>
+      )}
 
       <div className="card space-y-3">
-        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-ink-900">Email</h3><Estado ok={!!ch.email} /></div>
+        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-ink-900">Email</h3><Estado ok={!!ch.email} ativo={!!ativos.email} /></div>
         <p className="text-xs text-ink-400">
           Há dois transportes. O <b>Scaleway TEM</b> é o da frota e o preferido: se estiver preenchido,
           é o usado. O <b>AWS SES</b> fica como alternativa — mas exige credenciais AWS no servidor,
@@ -961,7 +972,7 @@ function CredenciaisTab() {
           <p className="text-xs font-semibold text-ink-600">AWS SES <span className="font-normal text-ink-400">(alternativa)</span></p>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Região SES" value={f.ses_region ?? ''} onChange={set('ses_region')} placeholder="eu-west-1" />
-            <Field label="Remetente (From)" value={f.ses_from ?? ''} onChange={set('ses_from')} placeholder="DS Crédito <noreply@dscredito.pt>" />
+            <Field label="Remetente (From)" value={f.ses_from ?? ''} onChange={set('ses_from')} placeholder="DS Crédito <noreply@notify.synertia-gw.ai>" />
           </div>
         </div>
 
@@ -969,7 +980,7 @@ function CredenciaisTab() {
       </div>
 
       <div className="card space-y-3">
-        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-ink-900">SMS (AWS SNS)</h3><Estado ok={!!ch.sms} /></div>
+        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-ink-900">SMS (AWS SNS)</h3><Estado ok={!!ch.sms} ativo={!!ativos.sms} /></div>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Região" value={f.aws_sms_region ?? ''} onChange={set('aws_sms_region')} placeholder="eu-west-1" />
           <Field label="Sender ID" value={f.sms_sender ?? ''} onChange={set('sms_sender')} placeholder="DSCredito" />
@@ -978,7 +989,7 @@ function CredenciaisTab() {
       </div>
 
       <div className="card space-y-3">
-        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-ink-900">WhatsApp Meta (Cloud API)</h3><Estado ok={!!ch.whatsapp_meta} /></div>
+        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-ink-900">WhatsApp Meta (Cloud API)</h3><Estado ok={!!ch.whatsapp_meta} ativo={!!ativos.whatsapp_meta} /></div>
         <p className="text-xs text-ink-400">Número oficial da loja. Cada loja tem de usar as SUAS credenciais — com as de outra, as mensagens saem pelo número dessa loja.</p>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Phone Number ID" value={f.meta_wa_phone_number_id ?? ''} onChange={set('meta_wa_phone_number_id')} />
@@ -992,7 +1003,7 @@ function CredenciaisTab() {
       </div>
 
       <div className="card space-y-3">
-        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-ink-900">WhatsApp Evolution</h3><Estado ok={!!ch.whatsapp_evolution} /></div>
+        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-ink-900">WhatsApp Evolution</h3><Estado ok={!!ch.whatsapp_evolution} ativo={!!ativos.whatsapp_evolution} /></div>
         <p className="text-xs text-ink-400">Número próprio de cada consultor, ligado por QR na página WhatsApp.</p>
         <Field label="URL do servidor" value={f.evolution_api_url ?? ''} onChange={set('evolution_api_url')} placeholder="http://127.0.0.1:8088" />
         <Segredo label="API key" definido={!!data.evolution_api_key}
