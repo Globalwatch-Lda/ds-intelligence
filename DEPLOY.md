@@ -62,6 +62,16 @@ Se o QR deixar de aparecer: `systemctl status evolution-tunnel` na box da app e
 pip install, build do Next, restart dos serviços). **`git push origin main` = live em
 ~2 min nas duas lojas.** Não empurrar para `main` trabalho por validar.
 
+> 🐛 **Esteve partido até 2026-07-31 e ninguém deu por isso.** Os `*.sh` estavam
+> commitados como `100644`, sem bit de execução; o cron invocava
+> `/home/ubuntu/ds-engine/auto-deploy.sh` diretamente, batia em *permission denied* e
+> morria **em silêncio** — o `~/ds-autodeploy.log` só é escrito de dentro do script,
+> por isso nem log havia. Um `chmod +x` só na box não resolvia: o `git reset --hard`
+> do deploy seguinte repunha o modo do índice. Corrigido no repo com
+> `git update-index --chmod=+x`. **Sintoma a reconhecer:** `git push` feito, box parada
+> num HEAD antigo, `~/ds-autodeploy.log` inexistente ou congelado →
+> `ls -l ~/ds-engine/*.sh` e confirmar o `x`.
+
 - Log: `~/ds-autodeploy.log` (Loulé: o `auto-deploy.sh` do próprio checkout).
 - Staging: branch `staging`, `deploy-staging.sh`.
 - Novas env vars → à mão em `<checkout>/backend/.env` (o deploy nunca lhes toca) + restart.
