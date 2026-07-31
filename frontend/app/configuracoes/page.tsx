@@ -681,6 +681,144 @@ function ComunicacaoTab() {
   );
 }
 
+// ---- Credenciais dos canais ----------------------------------------------
+// Antes desta tab as credenciais só entravam pelo `.env` da box, à mão e com
+// restart — o que obrigava a mexer no servidor por cada loja nova. O backend do
+// módulo já as guardava em `multicanal_config` (sobrepõe-se ao env); faltava o ecrã.
+// Segredos: o GET devolve booleano (definido/por definir), nunca o valor. Um campo
+// deixado em branco PRESERVA o que lá está; para apagar há o "limpar" explícito.
+type MCSettings = {
+  ses_region: string; ses_from: string;
+  aws_sms_region: string; sms_sender: string;
+  meta_wa_phone_number_id: string; meta_wa_access_token: boolean; meta_wa_api_version: string;
+  evolution_api_url: string; evolution_api_key: boolean; evolution_instance: string;
+  evolution_instance_prefix: string;
+  _channels: Record<string, boolean>;
+};
+
+function Estado({ ok }: { ok: boolean }) {
+  return (
+    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${ok ? 'bg-green-100 text-green-700' : 'bg-ink-100 text-ink-500'}`}>
+      {ok ? 'configurado' : 'por configurar'}
+    </span>
+  );
+}
+
+function Segredo({
+  label, definido, valor, onChange, onLimpar,
+}: { label: string; definido: boolean; valor: string; onChange: (v: string) => void; onLimpar: () => void }) {
+  return (
+    <label className="block">
+      <span className="mb-1 flex items-center gap-2 text-xs font-medium text-ink-500">
+        {label}
+        <span className={definido ? 'text-green-700' : 'text-ink-400'}>{definido ? '· definido' : '· por definir'}</span>
+        {definido && <button type="button" onClick={onLimpar} className="text-ds-700 hover:underline">limpar</button>}
+      </span>
+      <input
+        type="password" autoComplete="new-password" value={valor} onChange={(e) => onChange(e.target.value)}
+        placeholder={definido ? '•••••••• (deixe vazio para manter)' : ''}
+        className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 focus:border-[color:var(--accent)] focus:outline-none focus:ring-1 focus:ring-[color:var(--accent)]"
+      />
+    </label>
+  );
+}
+
+function CredenciaisTab() {
+  const { data, mutate } = useSWR<MCSettings>('/api/messaging/settings', api);
+  const [f, setF] = useState<Record<string, string>>({});
+  const [segredos, setSegredos] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!data) return;
+    setF({
+      ses_region: data.ses_region ?? '', ses_from: data.ses_from ?? '',
+      aws_sms_region: data.aws_sms_region ?? '', sms_sender: data.sms_sender ?? '',
+      meta_wa_phone_number_id: data.meta_wa_phone_number_id ?? '', meta_wa_api_version: data.meta_wa_api_version ?? '',
+      evolution_api_url: data.evolution_api_url ?? '', evolution_instance: data.evolution_instance ?? '',
+    });
+    setSegredos({});
+  }, [data]);
+
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
+
+  async function guardar() {
+    setBusy(true); setMsg(null);
+    try {
+      // Só os segredos EM QUE se mexeu seguem no pedido; os restantes ficam de fora
+      // e o backend preserva-os (campo ausente ≠ campo vazio).
+      await api('/api/messaging/settings', { method: 'PUT', body: JSON.stringify({ ...f, ...segredos }) });
+      setMsg('✓ Guardado.'); mutate();
+    } catch (e: any) { setMsg(errDetail(e)); } finally { setBusy(false); }
+  }
+
+  if (!data) return <p className="text-sm text-ink-400">A carregar …</p>;
+  const ch = data._channels ?? {};
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-ink-400">
+        Credenciais de cada canal. O que gravar aqui <b>sobrepõe-se</b> ao <code>.env</code> do servidor;
+        um campo vazio cai para o valor do <code>.env</code>. Um canal só entrega depois de ter
+        credenciais <b>e</b> de ser ativado na tab Comunicação.
+      </p>
+
+      <div className="card space-y-3">
+        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-ink-900">Email (AWS SES)</h3><Estado ok={!!ch.email} /></div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Região SES" value={f.ses_region ?? ''} onChange={set('ses_region')} placeholder="eu-west-1" />
+          <Field label="Remetente (From)" value={f.ses_from ?? ''} onChange={set('ses_from')} placeholder="DS Crédito <noreply@dscredito.pt>" />
+        </div>
+      </div>
+
+      <div className="card space-y-3">
+        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-ink-900">SMS (AWS SNS)</h3><Estado ok={!!ch.sms} /></div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Região" value={f.aws_sms_region ?? ''} onChange={set('aws_sms_region')} placeholder="eu-west-1" />
+          <Field label="Sender ID" value={f.sms_sender ?? ''} onChange={set('sms_sender')} placeholder="DSCredito" />
+        </div>
+      </div>
+
+      <div className="card space-y-3">
+        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-ink-900">WhatsApp Meta (Cloud API)</h3><Estado ok={!!ch.whatsapp_meta} /></div>
+        <p className="text-xs text-ink-400">Número oficial da loja. Cada loja tem de usar as SUAS credenciais — com as de outra, as mensagens saem pelo número dessa loja.</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Phone Number ID" value={f.meta_wa_phone_number_id ?? ''} onChange={set('meta_wa_phone_number_id')} />
+          <Field label="Versão da API" value={f.meta_wa_api_version ?? ''} onChange={set('meta_wa_api_version')} placeholder="v21.0" />
+        </div>
+        <Segredo label="Access token (System User)" definido={!!data.meta_wa_access_token}
+                 valor={segredos.meta_wa_access_token ?? ''}
+                 onChange={(v) => setSegredos({ ...segredos, meta_wa_access_token: v })}
+                 onLimpar={() => setSegredos({ ...segredos, meta_wa_access_token: '' })} />
+      </div>
+
+      <div className="card space-y-3">
+        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-ink-900">WhatsApp Evolution</h3><Estado ok={!!ch.whatsapp_evolution} /></div>
+        <p className="text-xs text-ink-400">Número próprio de cada consultor, ligado por QR na página WhatsApp.</p>
+        <Field label="URL do servidor" value={f.evolution_api_url ?? ''} onChange={set('evolution_api_url')} placeholder="http://127.0.0.1:8088" />
+        <Segredo label="API key" definido={!!data.evolution_api_key}
+                 valor={segredos.evolution_api_key ?? ''}
+                 onChange={(v) => setSegredos({ ...segredos, evolution_api_key: v })}
+                 onLimpar={() => setSegredos({ ...segredos, evolution_api_key: '' })} />
+        <div>
+          <span className="mb-1 block text-xs font-medium text-ink-500">Prefixo das instâncias</span>
+          <p className="rounded-lg border border-ink-100 bg-ink-50 px-3 py-2 font-mono text-sm text-ink-700">{data.evolution_instance_prefix || '(por definir)'}</p>
+          <p className="mt-1 text-xs text-ink-400">
+            Não se edita: deriva do <b>número da loja</b> (tab Loja). É o que separa as instâncias
+            desta loja das das outras no servidor partilhado. Sem número de loja, o canal fica inativo.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button onClick={guardar} disabled={busy} className="btn-primary">{busy ? 'A guardar …' : 'Guardar'}</button>
+        {msg && <span className="text-sm text-ink-600">{msg}</span>}
+      </div>
+    </div>
+  );
+}
+
 // ---- Módulos tab ---------------------------------------------------------
 type ModuleState = {
   id: string; label: string; installed: boolean; locked: boolean;
@@ -945,12 +1083,13 @@ function CatalogoLojasDialog({
 // ---- Page ----------------------------------------------------------------
 export default function ConfiguracoesPage() {
   const { can } = useMe();
-  type Tab = 'utilizadores' | 'perfis' | 'equipas' | 'comunicacao' | 'modulos' | 'loja';
+  type Tab = 'utilizadores' | 'perfis' | 'equipas' | 'comunicacao' | 'credenciais' | 'modulos' | 'loja';
   const tabs: { key: Tab; label: string }[] = [
     { key: 'utilizadores', label: 'Utilizadores' },
     ...(can('teams.manage') ? [{ key: 'equipas' as Tab, label: 'Equipas' }] : []),
     ...(can('profiles.manage') ? [{ key: 'perfis' as Tab, label: 'Perfis' }] : []),
     ...(can('messaging.config') ? [{ key: 'comunicacao' as Tab, label: 'Comunicação' }] : []),
+    ...(can('messaging.config') ? [{ key: 'credenciais' as Tab, label: 'Credenciais' }] : []),
     ...(can('messaging.config') ? [{ key: 'modulos' as Tab, label: 'Módulos' }] : []),
     { key: 'loja', label: 'Loja' },
   ];
@@ -979,6 +1118,7 @@ export default function ConfiguracoesPage() {
       {tab === 'equipas' && can('teams.manage') && <EquipasTab />}
       {tab === 'perfis' && can('profiles.manage') && <PerfisTab />}
       {tab === 'comunicacao' && can('messaging.config') && <ComunicacaoTab />}
+      {tab === 'credenciais' && can('messaging.config') && <CredenciaisTab />}
       {tab === 'modulos' && can('messaging.config') && <ModulosTab />}
       {tab === 'loja' && <LojaTab canEdit={can('loja.edit')} />}
     </div>
