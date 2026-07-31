@@ -1292,18 +1292,26 @@ function CatalogoLojasDialog({
 
 // ---- Page ----------------------------------------------------------------
 export default function ConfiguracoesPage() {
-  const { can } = useMe();
+  const { can, me } = useMe();
+  // Tudo o que vem depois de Perfis é configuração de INFRAESTRUTURA — canais,
+  // credenciais de fornecedores, módulos instalados e a identidade da loja. É
+  // domínio da Synertia, não do cliente: um diretor de loja não tem por onde
+  // avaliar uma chave de API nem porque é que um canal está desligado.
+  const superadmin = !!me?.is_superadmin;
   type Tab = 'utilizadores' | 'perfis' | 'equipas' | 'comunicacao' | 'credenciais' | 'modulos' | 'loja';
   const tabs: { key: Tab; label: string }[] = [
     { key: 'utilizadores', label: 'Utilizadores' },
     ...(can('teams.manage') ? [{ key: 'equipas' as Tab, label: 'Equipas' }] : []),
     ...(can('profiles.manage') ? [{ key: 'perfis' as Tab, label: 'Perfis' }] : []),
-    ...(can('messaging.config') ? [{ key: 'comunicacao' as Tab, label: 'Comunicação' }] : []),
-    ...(can('messaging.config') ? [{ key: 'credenciais' as Tab, label: 'Credenciais' }] : []),
-    ...(can('messaging.config') ? [{ key: 'modulos' as Tab, label: 'Módulos' }] : []),
-    { key: 'loja', label: 'Loja' },
+    ...(superadmin && can('messaging.config') ? [{ key: 'comunicacao' as Tab, label: 'Comunicação' }] : []),
+    ...(superadmin && can('messaging.config') ? [{ key: 'credenciais' as Tab, label: 'Credenciais' }] : []),
+    ...(superadmin && can('messaging.config') ? [{ key: 'modulos' as Tab, label: 'Módulos' }] : []),
+    ...(superadmin ? [{ key: 'loja' as Tab, label: 'Loja' }] : []),
   ];
   const [tab, setTab] = useState<Tab>('utilizadores');
+  useEffect(() => {
+    if (tabs.length && !tabs.some((t) => t.key === tab)) setTab(tabs[0].key);
+  }, [tabs, tab]);
 
   return (
     <div className="space-y-6">
@@ -1327,10 +1335,12 @@ export default function ConfiguracoesPage() {
       {tab === 'utilizadores' && <UtilizadoresTab canSync={can('crm.sync')} />}
       {tab === 'equipas' && can('teams.manage') && <EquipasTab />}
       {tab === 'perfis' && can('profiles.manage') && <PerfisTab />}
-      {tab === 'comunicacao' && can('messaging.config') && <ComunicacaoTab />}
-      {tab === 'credenciais' && can('messaging.config') && <CredenciaisTab />}
-      {tab === 'modulos' && can('messaging.config') && <ModulosTab />}
-      {tab === 'loja' && <LojaTab canEdit={can('loja.edit')} />}
+      {/* A condição repete-se aqui de propósito: esconder a tab não pode ser a única
+          guarda, senão bastava adivinhar o estado para chegar ao conteúdo. */}
+      {tab === 'comunicacao' && superadmin && can('messaging.config') && <ComunicacaoTab />}
+      {tab === 'credenciais' && superadmin && can('messaging.config') && <CredenciaisTab />}
+      {tab === 'modulos' && superadmin && can('messaging.config') && <ModulosTab />}
+      {tab === 'loja' && superadmin && <LojaTab canEdit={can('loja.edit')} />}
     </div>
   );
 }

@@ -25,7 +25,7 @@ if _MODULE not in sys.path:
 from synertia_multicanal import MulticanalCtx, MulticanalSettings  # noqa: E402
 
 from .config import settings as _cfg  # noqa: E402
-from .core.scope import require_cap  # noqa: E402
+from .core.scope import require_cap, require_superadmin  # noqa: E402
 from .db import supabase  # noqa: E402
 from .routers.auth import COOKIE_NAME, token_user  # noqa: E402
 
@@ -101,12 +101,29 @@ def _client_search(q: str) -> list[dict]:
     return [{"crm_id": r["crm_id"], "nome": r.get("name"), "telefone": r.get("telephone")} for r in rows]
 
 
+def _require_cap(request: Request, cap: str) -> None:
+    """RBAC do host, com uma política a mais: a CONFIGURAÇÃO do multicanal é da
+    Synertia, não do cliente.
+
+    `messaging.config` governa credenciais de fornecedores, limites de envio e a
+    instalação de canais — um diretor de loja não tem por onde avaliar uma chave de
+    API. Esconder as tabs no frontend não chega: sem esta guarda o endpoint
+    continuava a responder a quem soubesse o caminho.
+
+    `messaging.send` fica intocado — é o que os consultores usam para falar com
+    clientes, e restringi-lo partia o produto.
+    """
+    require_cap(request, cap)
+    if cap == "messaging.config":
+        require_superadmin(request)
+
+
 def build_ctx() -> MulticanalCtx:
     """Contexto completo (API): supabase + settings + RBAC + auth + hooks DS."""
     return MulticanalCtx(
         supabase=supabase(),
         settings=_settings(),
-        require_cap=require_cap,
+        require_cap=_require_cap,
         current_user=_current_user,
         get_user_instance=_get_user_instance,
         set_user_instance=_set_user_instance,

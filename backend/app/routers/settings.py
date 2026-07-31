@@ -470,7 +470,9 @@ class LojaIn(BaseModel):
 
 @router.put("/loja")
 def put_loja(body: LojaIn, request: Request):
-    require_cap(request, "loja.edit")
+    # A tab Loja é superadmin-only (identidade da instalação + limites de custo da
+    # Análise Documental). O GET continua aberto: o cabeçalho lê dele o nome da loja.
+    require_superadmin(request)
     sb = supabase()
     upd = {"nome": body.nome, "updated_at": _now()}
     # QUAL loja é esta instalação só o superadmin decide: trocá-la reaponta a
