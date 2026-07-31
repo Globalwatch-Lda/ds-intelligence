@@ -71,12 +71,18 @@ function ConnectCard({ status, onChange }: { status: Status; onChange: () => voi
         </div>
       )}
       {!qr && code && <p className="text-sm text-ink-600">Código de emparelhamento: <b>{code}</b></p>}
-      {(err || status.erro) && (
+      {/* Só o erro do CLIQUE vira alarme. O `status.erro` (polling de 3 em 3s) fica
+          numa linha discreta: sinaliza serviço em baixo sem gritar com quem ainda
+          nem tentou ligar. */}
+      {err && (
         <div className="rounded-lg border border-ds-200 bg-ds-50 px-3 py-2">
           <p className="text-sm font-medium text-ds-700">Não foi possível gerar o QR.</p>
-          <p className="mt-1 break-words text-xs text-ds-700/80">{err || status.erro}</p>
-          <p className="mt-1 text-xs text-ink-500">O serviço Evolution não respondeu — é uma questão de servidor, não do seu telemóvel. Avise o suporte.</p>
+          <p className="mt-1 break-words text-xs text-ds-700/80">{err}</p>
+          <p className="mt-1 text-xs text-ink-500">É uma questão de servidor, não do seu telemóvel. Avise o suporte.</p>
         </div>
+      )}
+      {!err && status.erro && (
+        <p className="break-words text-xs text-ink-400">Serviço WhatsApp indisponível de momento: {status.erro}</p>
       )}
     </div>
   );
