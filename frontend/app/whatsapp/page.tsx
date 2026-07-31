@@ -29,16 +29,31 @@ function ConnectCard({ status, onChange }: { status: Status; onChange: () => voi
   const [code, setCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  useEffect(() => { if (status.connected) { setQr(null); setCode(null); } }, [status.connected]);
+  const [live, setLive] = useState(false);  // sessão de emparelhamento aberta
+  useEffect(() => { if (status.connected) { setQr(null); setCode(null); setLive(false); } }, [status.connected]);
 
-  async function connect() {
-    setBusy(true); setErr(null);
+  // `silent` = renovação automática: não pisca o botão nem limpa o que está no ecrã
+  // até haver imagem nova.
+  async function connect(silent = false) {
+    if (!silent) setBusy(true);
+    setErr(null);
     try {
       const r = await api<ConnectResp>('/api/messaging/whatsapp/connect', { method: 'POST' });
-      setQr(r.qr); setCode(r.code); onChange();
-    } catch (e: any) { setErr(errMsg(e)); }
-    finally { setBusy(false); }
+      setQr(r.qr); setCode(r.code); setLive(true); onChange();
+    } catch (e: any) { setErr(errMsg(e)); setLive(false); }
+    finally { if (!silent) setBusy(false); }
   }
+
+  // O Evolution roda o QR a cada ~45s. Mostrar uma imagem fixa fazia com que o
+  // código no ecrã estivesse quase sempre expirado: o telemóvel lia, tentava ligar
+  // e falhava sem aviso — parecia que a leitura não fazia nada. Renovar antes de
+  // expirar é o que torna a leitura fiável.
+  useEffect(() => {
+    if (!live || status.connected) return;
+    const t = setInterval(() => { connect(true); }, 30000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live, status.connected]);
 
   return (
     <div className="card space-y-4">
@@ -46,10 +61,11 @@ function ConnectCard({ status, onChange }: { status: Status; onChange: () => voi
         <span className={`inline-block h-2.5 w-2.5 rounded-full ${status.state === 'connecting' ? 'bg-amber-500' : 'bg-ink-300'}`} />
         <span className="text-sm font-medium text-ink-900">{status.state === 'connecting' ? 'A ligar …' : 'Não ligado'}</span>
       </div>
-      <button onClick={connect} disabled={busy} className="btn-primary">{busy ? 'A preparar …' : qr ? 'Gerar novo QR' : 'Ligar WhatsApp'}</button>
+      <button onClick={() => connect()} disabled={busy} className="btn-primary">{busy ? 'A preparar …' : qr ? 'Gerar novo QR' : 'Ligar WhatsApp'}</button>
       {qr && (
         <div className="space-y-2">
           <p className="text-sm text-ink-600">No telemóvel: WhatsApp → <b>Dispositivos ligados</b> → <b>Ligar um dispositivo</b> e leia o código. Atualiza sozinho quando ligar.</p>
+          <p className="text-xs text-ink-400">O código renova-se automaticamente a cada 30 segundos — leia sempre o que estiver no ecrã <b>neste momento</b>.</p>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={qrSrc(qr)} alt="QR code WhatsApp" className="h-56 w-56 rounded-lg border border-ink-100" />
         </div>
