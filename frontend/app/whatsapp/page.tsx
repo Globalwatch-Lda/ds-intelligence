@@ -179,10 +179,17 @@ function Console({ status }: { status: Status }) {
     try {
       const finalCorpo = resolve(corpo, nomeCliente, nomeConsultor);
       const agendado_para = quando === 'later' ? new Date(dataHora).toISOString() : null;
-      const r = await api<{ enqueued: number; agendado: boolean }>('/api/messaging/whatsapp/send', {
+      const r = await api<{ enqueued: number; agendado: boolean; entregue: boolean | null; erro: string | null }>('/api/messaging/whatsapp/send', {
         method: 'POST', body: JSON.stringify({ numero, corpo: finalCorpo, agendado_para }),
       });
-      setMsg(r.agendado ? `✓ Mensagem agendada para ${new Date(dataHora).toLocaleString('pt-PT')}.` : '✓ Mensagem em fila para envio.');
+      // `entregue` só vem preenchido no envio imediato (destinatário único, sem
+      // agendamento); nos restantes casos a entrega fica com o worker.
+      setMsg(
+        r.agendado ? `✓ Mensagem agendada para ${new Date(dataHora).toLocaleString('pt-PT')}.`
+        : r.entregue ? '✓ Mensagem enviada.'
+        : r.erro ? `Não foi entregue agora (${r.erro}) — fica em fila para nova tentativa.`
+        : '✓ Mensagem em fila para envio.',
+      );
       setCorpo(''); mutHist();
     } catch (e: any) { setMsg(`Erro: ${e.message}`); } finally { setBusy(false); }
   }
