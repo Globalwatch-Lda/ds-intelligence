@@ -196,7 +196,7 @@ function LeadsConteudo() {
         <h1 className="text-2xl font-semibold text-ink-900">Leads</h1>
         <p className="text-ink-400 mt-1">
           Oportunidades vindas do CRM (CrediDesk), no âmbito da sua carteira.
-          As leads a negrito ainda não têm contacto registado no CRM, seja qual for a data em que entraram.
+          As leads a negrito são as <b>novas</b>: entraram no CRM e ainda ninguém lhes registou contacto.
         </p>
       </div>
 
@@ -208,7 +208,7 @@ function LeadsConteudo() {
           </span>
           {novas.length > 0 && (
             <span className="chip chip-alert ml-2" title="Sem contacto registado no CRM">
-              {novas.length} por trabalhar
+              {novas.length} novas
             </span>
           )}
         </h3>
@@ -238,7 +238,7 @@ function LeadsConteudo() {
           <label className="flex items-center gap-2 rounded-lg border border-ink-100 px-3 py-1.5 text-ink-700">
             <input type="checkbox" checked={filtros.soNovas}
                    onChange={(e) => setFiltros({ ...filtros, soNovas: e.target.checked })} />
-            só por trabalhar
+            só novas
           </label>
           <label className="flex items-center gap-1 text-ink-400">
             criadas de
@@ -275,7 +275,7 @@ function LeadsConteudo() {
                 <Th campo="ultima_acao">Última acção</Th>
                 <th className="py-2 text-center">
                   <button type="button" onClick={() => ordenarPor('nova')}
-                          className="hover:text-ds-600" title="Ordenar: por trabalhar primeiro">
+                          className="hover:text-ds-600" title="Ordenar: novas primeiro">
                     Acções
                   </button>
                 </th>
@@ -289,11 +289,11 @@ function LeadsConteudo() {
                     className={`border-b border-ink-100/60 last:border-0 align-top ${l.nova ? 'font-semibold' : ''}`}>
                   <td className="py-2 text-ink-900">
                     {l.nome}
-                    {/* "por trabalhar" e não "nova": o critério é não ter contacto
-                        registado no CRM, não a idade da lead. */}
+                    {/* "nova" = sem contacto registado no CRM (não é a idade da
+                        lead); o title do chip di-lo a quem passe o rato. */}
                     {l.nova && (
                       <span className="chip chip-alert ml-2 font-medium" title="Sem contacto registado no CRM">
-                        por trabalhar
+                        nova
                       </span>
                     )}
                   </td>
