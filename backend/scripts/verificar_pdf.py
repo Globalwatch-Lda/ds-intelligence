@@ -17,6 +17,10 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
+# A consola do Windows abre em cp1252 e rebentava a imprimir acentos ou um ✓.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from app.core.forense_ficheiro import analisar  # noqa: E402
 
 CORES = {"alto": "!!", "medio": " !", "baixo": "  "}
@@ -35,7 +39,7 @@ def verificar(caminho: Path) -> int:
         ("criado_em", "Criado em"), ("modificado_em", "Modificado em"),
         ("assinado_digitalmente", "Assinado digitalmente"),
         ("software", "Software (EXIF)"), ("data_original", "Data da fotografia"),
-        ("data_ficheiro", "Data de gravação"),
+        ("data_ficheiro", "Data de gravação"), ("fontes", "Fontes incorporadas"),
     ):
         if factos.get(chave) not in (None, ""):
             print(f"    {rotulo:22}: {factos[chave]}")

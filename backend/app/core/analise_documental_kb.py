@@ -163,6 +163,16 @@ SINAIS_FICHEIRO: list[dict] = [
     {"id": "fich_anotacoes", "categoria": "Integridade do ficheiro",
      "descricao": "O ficheiro contém anotações de texto livre ou campos de formulário — a forma "
                   "mais comum de escrever por cima de valores num documento digitalizado."},
+    {"id": "fich_reimpressao", "categoria": "Integridade do ficheiro",
+     "descricao": "O ficheiro foi re-gravado por um motor de impressão ou visualização (Print to "
+                  "PDF, PDFium/Chrome, Quartz): é uma cópia gerada por quem o enviou, não o PDF "
+                  "emitido pelo banco, entidade patronal ou AT. Os metadados do emissor "
+                  "perderam-se, o que impede a comparação com o original."},
+    {"id": "fich_suite_escritorio", "categoria": "Integridade do ficheiro",
+     "descricao": "As fontes incorporadas são as de omissão do Word/LibreOffice: o documento foi "
+                  "redigido num processador de texto, não emitido por software de gestão. "
+                  "Esperado numa declaração da entidade patronal; a confirmar num recibo, "
+                  "extrato ou documento da AT."},
     {"id": "fich_sem_metadados", "categoria": "Integridade do ficheiro",
      "descricao": "Ficheiro sem metadados de origem (produtor/criador no PDF, EXIF na fotografia). "
                   "Típico de ficheiros passados por ferramentas online, que os limpam."},

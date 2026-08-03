@@ -63,6 +63,27 @@ EDITORES = {
     "acrobat": "Adobe Acrobat (edição de PDF)",
 }
 
+# Motores de IMPRESSÃO/VISUALIZAÇÃO. Não editam nada, mas a sua presença diz que
+# o ficheiro em mãos não é o que o emissor produziu: alguém abriu o documento e
+# mandou-o imprimir para PDF, ou passou-o por uma ferramenta que usa estes
+# motores. A cadeia digital quebra-se aí — os metadados do emissor original
+# desaparecem, e com eles a possibilidade de os comparar.
+REIMPRESSORES = {
+    "pdfium": "PDFium (motor de PDF do Chrome, usado também por ferramentas online)",
+    "skia/pdf": "Skia (motor gráfico do Chrome)",
+    "print to pdf": "Microsoft Print to PDF",
+    "microsoft: print": "Microsoft Print to PDF",
+    "quartz pdfcontext": "Quartz (impressão do macOS)",
+    "cairo": "Cairo (impressão em Linux)",
+    "wkhtmltopdf": "wkhtmltopdf (impressão de página web)",
+}
+
+# Fontes que denunciam composição numa suite de escritório. Um recibo de
+# vencimento ou uma declaração da entidade patronal saem de software de gestão,
+# que incorpora as suas próprias fontes; Liberation/Calibri/DejaVu significam
+# LibreOffice ou Word — alguém escreveu o documento à mão.
+FONTES_ESCRITORIO = ("liberation", "calibri", "cambria", "dejavu", "carlito", "caladea")
+
 # Geradores comuns e inócuos — anotados para o relatório não os apresentar como
 # achado quando são apenas o "como foi impresso".
 GERADORES_COMUNS = (
@@ -115,8 +136,13 @@ def _ferramenta(valor: str) -> tuple[str, str] | None:
     return None
 
 
-def analisar_pdf(dados: bytes, nome: str) -> tuple[list[dict], dict]:
-    """(sinais, factos) sobre a integridade de um PDF."""
+def analisar_pdf(dados: bytes, nome: str, emitido_por_sistema: bool | None = None) -> tuple[list[dict], dict]:
+    """(sinais, factos) sobre a integridade de um PDF.
+
+    `emitido_por_sistema`: True para documentos que saem de software de gestão
+    (recibo, extrato, IRS), False para os que se escrevem (contrato, declaração),
+    None quando não se sabe — muda o peso do sinal de suite de escritório.
+    """
     sinais: list[dict] = []
     txt = _texto_bytes(dados)
     factos: dict = {"tipo": "pdf"}
@@ -255,6 +281,47 @@ def analisar_pdf(dados: bytes, nome: str) -> tuple[list[dict], dict]:
             "medio",
         ))
 
+    # Reimpressão: o ficheiro não é o original do emissor. Só se ainda não houver
+    # um sinal de edição — nesse caso o achado forte já diz mais do que este.
+    assinatura_conhecida = f"{producer or ''} {creator or ''}".lower()
+    if not any(s["id"] in ("fich_editor", "fich_xmp_historico") for s in sinais):
+        for chave, rotulo in REIMPRESSORES.items():
+            if chave in assinatura_conhecida:
+                sinais.append(_sinal(
+                    "fich_reimpressao",
+                    f"Não é o ficheiro original — foi re-gravado por {rotulo}",
+                    f"O produtor do PDF é «{producer or creator}». Este software não emite "
+                    "documentos: imprime ou re-grava os que lhe dão. O ficheiro que está no "
+                    "processo é, portanto, uma cópia gerada por quem o enviou, e não o PDF "
+                    "que o banco, a entidade patronal ou a AT emitiram — os metadados do "
+                    "emissor original perderam-se nessa passagem. Comum e muitas vezes "
+                    "inocente; relevante porque impede a comparação com o original.",
+                    "baixo",
+                ))
+                break
+
+    # Composição numa suite de escritório: o documento foi escrito, não emitido.
+    # Só é achado num documento que DEVIA sair de um sistema (recibo, extrato,
+    # IRS). Num contrato ou numa declaração da entidade patronal, ter sido escrito
+    # no Word é o normal — assinalá-lo seria ruído garantido.
+    fontes = set(re.findall(r"/BaseFont\s*/([A-Za-z0-9+#-]+)", txt))
+    factos["fontes"] = sorted(fontes)[:8]
+    if emitido_por_sistema is not False and any(
+        any(f in nome.lower() for f in FONTES_ESCRITORIO) for nome in fontes
+    ):
+        sinais.append(_sinal(
+            "fich_suite_escritorio",
+            "Documento composto numa suite de escritório (Word/LibreOffice)",
+            "As fontes incorporadas (" + ", ".join(sorted(fontes)[:3]) + ") são as de omissão do "
+            "Word/LibreOffice. Recibos de vencimento, extratos e documentos da AT saem de "
+            "software de gestão, que incorpora as suas próprias fontes — um documento destes "
+            "escrito num processador de texto foi redigido por alguém, não emitido por um "
+            "sistema. Confirmar o original junto do emitente.",
+            # Sem saber o tipo de documento (verificação avulsa), fica em baixo:
+            # a mesma observação vale muito menos se puder ser um contrato.
+            "medio" if emitido_por_sistema else "baixo",
+        ))
+
     if not producer and not creator:
         sinais.append(_sinal(
             "fich_sem_metadados",
@@ -352,12 +419,13 @@ def analisar_imagem(dados: bytes, nome: str) -> tuple[list[dict], dict]:
     return sinais, factos
 
 
-def analisar(dados: bytes, nome: str, media_type: str | None) -> tuple[list[dict], dict]:
+def analisar(dados: bytes, nome: str, media_type: str | None,
+             emitido_por_sistema: bool | None = None) -> tuple[list[dict], dict]:
     """Ponto de entrada: escolhe o analisador pelo tipo. Nunca levanta — um erro
     aqui não pode derrubar a Fase 2, que é a análise principal."""
     try:
         if (media_type or "").startswith("application/pdf") or dados[:5] == b"%PDF-":
-            return analisar_pdf(dados, nome)
+            return analisar_pdf(dados, nome, emitido_por_sistema)
         if (media_type or "").startswith("image/"):
             return analisar_imagem(dados, nome)
     except Exception as e:  # pragma: no cover - defesa

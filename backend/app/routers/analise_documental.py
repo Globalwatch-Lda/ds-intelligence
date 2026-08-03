@@ -59,6 +59,59 @@ def _limites() -> tuple[int, float]:
     return n, mb
 
 
+def _json_da_resposta(texto: str) -> dict | None:
+    """Extrai o objecto JSON de uma resposta do modelo.
+
+    Existe porque `json.loads(texto)` falhava em silêncio sempre que o modelo
+    escrevia o raciocínio antes do JSON ("I'll analyze this payslip…") — e, ao
+    falhar, a Fase 2 devolvia ZERO sinais para aquele ficheiro. O relatório dizia
+    "nenhum sinal detetado" quando na verdade não tinha conseguido ler a resposta:
+    o pior erro possível numa análise de fraude. Apanhado a 3 Ago 2026 com um
+    recibo real.
+
+    Estratégia: tentar o texto todo; depois a última cerca ```; depois o primeiro
+    bloco `{...}` equilibrado do texto.
+    """
+    if not texto:
+        return None
+    tentativas = [texto.strip()]
+    if "```" in texto:
+        partes = texto.split("```")
+        for p in partes[1:]:
+            corpo = p.lstrip()
+            if corpo.lower().startswith("json"):
+                corpo = corpo[4:]
+            tentativas.append(corpo.strip().rstrip("`").strip())
+    inicio = texto.find("{")
+    if inicio >= 0:
+        nivel, em_string, escapado = 0, False, False
+        for i in range(inicio, len(texto)):
+            ch = texto[i]
+            if escapado:
+                escapado = False
+                continue
+            if ch == "\\":
+                escapado = True
+            elif ch == '"':
+                em_string = not em_string
+            elif not em_string:
+                if ch == "{":
+                    nivel += 1
+                elif ch == "}":
+                    nivel -= 1
+                    if nivel == 0:
+                        tentativas.append(texto[inicio: i + 1])
+                        break
+    for t in tentativas:
+        try:
+            valor = json.loads(t)
+            if isinstance(valor, dict):
+                return valor
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return None
+
+
 def _forense_ativa() -> bool:
     """Fase 3 (integridade do ficheiro) ligada? Configurável na tab Loja.
 
@@ -226,11 +279,8 @@ def _sinais_llm(processo: dict, proponentes: list[dict], docs: dict) -> list[dic
                    "content": f"<dados_processo>\n{json.dumps(dados, ensure_ascii=False, default=str)}\n</dados_processo>"}],
     )
     text = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
-    if text.startswith("```"):
-        text = text.split("```", 2)[1].lstrip("json").strip()
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
+    data = _json_da_resposta(text)
+    if data is None:
         return []
     valid_ids = {s["id"] for s in SINAIS_ALERTA}
     sinais = []
@@ -336,6 +386,23 @@ def _media_type(file_name: str | None) -> str | None:
     return _MEDIA.get(ext)
 
 
+# Documentos que SAEM de um sistema (software de RH, banco, AT) e os que uma
+# pessoa escreve. Só nos primeiros é achado que o ficheiro venha do Word: uma
+# declaração da entidade patronal é escrita mesmo, e assinalá-la seria ruído.
+_DOC_DE_SISTEMA = ("recibo", "vencimento", "extrato", "irs", "responsabilidade",
+                   "comprovativo", "segurança social", "seguranca social", "iva", "balancete")
+_DOC_ESCRITO = ("declaração", "declaracao", "contrato", "carta", "promessa", "escritura")
+
+
+def _emitido_por_sistema(doc_nome: str) -> bool | None:
+    nome = (doc_nome or "").lower()
+    if any(p in nome for p in _DOC_DE_SISTEMA):
+        return True
+    if any(p in nome for p in _DOC_ESCRITO):
+        return False
+    return None
+
+
 def _forense_sinais(b64: str, file_name: str, media_type: str, doc_nome: str, proponente: str) -> list[dict]:
     """Sinais de ADULTERAÇÃO do ficheiro (metadados, guardas incrementais, EXIF).
 
@@ -350,7 +417,7 @@ def _forense_sinais(b64: str, file_name: str, media_type: str, doc_nome: str, pr
         dados = base64.b64decode(b64)
     except Exception:
         return []
-    sinais, _factos = analisar(dados, file_name, media_type)
+    sinais, _factos = analisar(dados, file_name, media_type, _emitido_por_sistema(doc_nome))
     base_por_id = {s["id"]: s["descricao"] for s in SINAIS_FICHEIRO}
     return [
         {
@@ -438,12 +505,11 @@ def _vision_sinais(doc_nome: str, proponente: str, file_name: str, media_type: s
         ]}],
     )
     text = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
-    if text.startswith("```"):
-        text = text.split("```", 2)[1].lstrip("json").strip()
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        return [], {}
+    data = _json_da_resposta(text)
+    if data is None:
+        # Nunca em silêncio: sem isto, um ficheiro cuja resposta não se consegue
+        # ler aparece no relatório como "sem sinais".
+        return [], {"_leitura_falhou": True}
     valid_ids = {s["id"] for s in SINAIS_ALERTA}
     out = []
     for s in data.get("sinais", []):
@@ -509,11 +575,8 @@ def _cruzamento_sinais(factos: list[dict], contexto: str) -> list[dict]:
             + "\n\nDevolve os sinais de incoerência entre documentos em JSON."}],
     )
     text = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
-    if text.startswith("```"):
-        text = text.split("```", 2)[1].lstrip("json").strip()
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
+    data = _json_da_resposta(text)
+    if data is None:
         return []
     valid_ids = {s["id"] for s in SINAIS_ALERTA}
     out = []
