@@ -30,9 +30,6 @@ type Lead = {
   created_at: string;
 };
 
-// Estados de lead fechados no CrediDesk (não contam como dormentes).
-const CLOSED = new Set(['Concluido', 'Concluído', 'Perdido']);
-
 const fmtData = (v: string | null) => (v ? new Date(v).toLocaleDateString('pt-PT') : '—');
 
 // useSearchParams obriga a uma fronteira de Suspense: sem ela o Next não
@@ -69,12 +66,6 @@ function LeadsConteudo() {
     const alvo = leads.find((l) => l.id === leadParam);
     if (alvo) setAberta(alvo);
   }, [leadParam, leads]);
-
-  const dormentes = leads.filter((l) => {
-    if (!l.ultima_acao || CLOSED.has(l.status)) return false;
-    const diff = (Date.now() - new Date(l.ultima_acao).getTime()) / 86400000;
-    return diff > 30;
-  });
 
   function BotaoNotas({ lead }: { lead: Lead }) {
     const info = notas[lead.id];
@@ -135,39 +126,8 @@ function LeadsConteudo() {
         <h1 className="text-2xl font-semibold text-ink-900">Leads</h1>
         <p className="text-ink-400 mt-1">
           Oportunidades vindas do CRM (CrediDesk), no âmbito da sua carteira.
-          Identifique leads dormentes e recupere-as antes que arrefeçam.
+          As leads a negrito ainda não têm contacto registado.
         </p>
-      </div>
-
-      <div className="card">
-        <h2 className="text-lg font-semibold text-ink-900 mb-3">
-          Leads dormentes (&gt; 30 dias sem acção){' '}
-          <span className="chip chip-alert ml-2">{dormentes.length}</span>
-        </h2>
-        {dormentes.length === 0 ? (
-          <p className="text-ink-400 text-sm">Nenhuma lead dormente — bom trabalho.</p>
-        ) : (
-          <ul className="text-sm divide-y divide-ink-100">
-            {dormentes.map((l) => (
-              <li key={l.id} className="py-2 flex items-baseline justify-between gap-4">
-                <div>
-                  <div className="text-ink-900">{l.nome}</div>
-                  <div className="text-ink-400 text-xs">
-                    {l.produto || '—'} · {l.consultor_nome || 'por atribuir'}
-                  </div>
-                </div>
-                <div className="text-ink-400 text-xs shrink-0 text-right">
-                  <div>última acção: {fmtData(l.ultima_acao)}</div>
-                  {l.ultima_acao_texto && (
-                    <div className="max-w-[320px] truncate" title={l.ultima_acao_texto}>
-                      {l.ultima_acao_texto}
-                    </div>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
 
       <div className="card">
@@ -186,6 +146,7 @@ function LeadsConteudo() {
             <thead>
               <tr className="text-left text-ink-400 border-b border-ink-100">
                 <th className="py-2">Nome</th>
+                <th className="py-2">Criada em</th>
                 <th className="py-2">Produto</th>
                 <th className="py-2">Consultor</th>
                 <th className="py-2">Status</th>
@@ -207,6 +168,7 @@ function LeadsConteudo() {
                       </span>
                     )}
                   </td>
+                  <td className="py-2 text-ink-700 whitespace-nowrap">{fmtData(l.created_at)}</td>
                   <td className="py-2 text-ink-700">{l.produto || '—'}</td>
                   <td className="py-2 text-ink-700">{l.consultor_nome || <span className="text-ink-300">— por atribuir —</span>}</td>
                   <td className="py-2"><span className="chip font-medium">{l.status || '—'}</span></td>

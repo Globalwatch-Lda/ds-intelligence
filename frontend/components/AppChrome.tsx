@@ -66,7 +66,9 @@ const config: SynertiaConfig = {
     { href: '/analise-documental', label: 'Análise documental', icon: <IconDocScan /> },
   ],
   liveLink: { href: '/clientes-live', label: 'CRM em direto' },
-  fullWidthRoutes: ['/dashboard'],
+  // Leads a largura inteira: a tabela tem sete colunas, uma delas com o texto da
+  // última acção — na coluna estreita o texto partia-se em três linhas por lead.
+  fullWidthRoutes: ['/dashboard', '/leads'],
 };
 
 // A barra lateral do SynertiaShell guarda o estado "fixada" em localStorage

@@ -494,6 +494,89 @@ def put_loja(body: LojaIn, request: Request):
     return {"ok": True}
 
 
+# ---- dados fiscais da loja (cópia do CRM) --------------------------------
+_FISCAIS_COLS = (
+    "empresa_nome, empresa_nome_comercial, nif, morada, codigo_postal, localidade, "
+    "concelho, distrito, telefone, email, website, capital_social, gerencia, "
+    "registo_bp, categoria_bp, agencia_nome, agencia_crm_id, empresa_crm_id, "
+    "fiscais_atualizado_em"
+)
+
+
+@router.get("/loja/fiscais")
+def get_loja_fiscais():
+    """A cópia guardada. Não vai ao CRM: a tab tem de abrir depressa e funcionar
+    mesmo com o CrediDesk em baixo. O refrescamento é explícito, no POST abaixo."""
+    row = (
+        supabase().table("loja_config").select(_FISCAIS_COLS)
+        .eq("id", 1).limit(1).execute().data or [{}]
+    )[0]
+    return {"fiscais": row}
+
+
+def _morada_agencia(ag: dict, gi: dict) -> str:
+    """A morada da LOJA (agência) quando existe; a da sede só como recurso — os
+    dados fiscais que a loja imprime são os do estabelecimento onde atende."""
+    rua = (ag.get("streetName") or gi.get("streetName") or "").strip().rstrip(",")
+    return " ".join(rua.split())
+
+
+@router.post("/loja/fiscais/sincronizar")
+def sync_loja_fiscais(request: Request):
+    """Vai ao CrediDesk buscar a agência + a sociedade e guarda a cópia.
+
+    Requer `loja.edit`: são os dados de identificação da loja, e quem os pode
+    editar pode refrescá-los. Read-only do lado do CRM, como todo o resto.
+    """
+    require_cap(request, "loja.edit")
+    from integrations.ds_crm.client import CredidekClient
+
+    try:
+        c = CredidekClient()
+        ag = c.get_agency()
+        if not ag:
+            raise HTTPException(502, "O CRM não devolveu a agência desta conta.")
+        gi = (c.get_company(int(ag["companyId"])) or {}).get("generalInfo") or {} if ag.get("companyId") else {}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Não foi possível ler o CRM: {type(e).__name__}: {e}"[:200])
+
+    nif = gi.get("taxidNumber") or ag.get("taxidNumber")
+    registo = gi.get("registrationBankptId")
+    upd = {
+        "empresa_nome": gi.get("name") or ag.get("companyName"),
+        "empresa_nome_comercial": gi.get("businnessName") or ag.get("businnessName"),
+        "nif": str(nif) if nif else None,
+        "morada": _morada_agencia(ag, gi) or None,
+        "codigo_postal": ag.get("postalCode") or gi.get("postalCode"),
+        "localidade": ag.get("locality") or gi.get("locality"),
+        "concelho": gi.get("countyName"),
+        "distrito": gi.get("districtName"),
+        "telefone": ag.get("phone") or ag.get("cellphone") or gi.get("phone"),
+        "email": ag.get("email") or gi.get("email"),
+        "website": ag.get("website") or gi.get("website"),
+        "capital_social": gi.get("shareCapital"),
+        "gerencia": gi.get("managerName") or ag.get("managerName"),
+        # O CRM guarda o registo BdP como número (3060) e o portal mostra-o com
+        # zeros à esquerda (0003060) — normalizamos para a forma publicada.
+        "registo_bp": f"{int(registo):07d}" if str(registo or "").isdigit() else (str(registo) if registo else None),
+        "categoria_bp": gi.get("registrationBankptCategoryActivity"),
+        "agencia_nome": ag.get("businnessName") or ag.get("name"),
+        "agencia_crm_id": ag.get("id"),
+        "empresa_crm_id": gi.get("id") or ag.get("companyId"),
+        "fiscais_raw": {"agency": ag, "company_general_info": gi},
+        "fiscais_atualizado_em": _now(),
+        "updated_at": _now(),
+    }
+    sb = supabase()
+    sb.table("loja_config").update(upd).eq("id", 1).execute()
+    row = (
+        sb.table("loja_config").select(_FISCAIS_COLS).eq("id", 1).limit(1).execute().data or [{}]
+    )[0]
+    return {"fiscais": row}
+
+
 # ---- CRM sync (re-ingest, so a new diretor_comercial's team gets tagged) ----
 _SYNC_SOURCES = ["credidesk_processos", "credidesk_leads"]
 

@@ -169,6 +169,29 @@ class CredidekClient:
         arr = self._get(f"/creditprocesses/documents/{file_id}").get("creditprocessesdocuments") or []
         return arr[0] if arr else None
 
+    # ---- identidade da loja (dados fiscais) ---------------------------------
+    def jwt_claims(self) -> dict:
+        """Claims do JWT actual — traz `agencyId`, `companyId` e `email` da conta."""
+        payload_b64 = self.jwt.split(".")[1]
+        payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload_b64))
+
+    def get_agency(self, agency_id: int | None = None) -> dict:
+        """A loja no CRM: nome, morada, contactos e o `companyId` da sociedade.
+
+        Sem `agency_id` usa a agência do JWT — a conta CRM só alcança a sua, por
+        isso é essa a loja desta instalação.
+        """
+        aid = agency_id or int(self.jwt_claims().get("agencyId"))
+        arr = self._get(f"/agency/{aid}").get("agency") or []
+        return arr[0] if arr else {}
+
+    def get_company(self, company_id: int) -> dict:
+        """A sociedade que explora a loja — NIF, capital social, gerência e o
+        registo de intermediário de crédito no Banco de Portugal (`bankPt`)."""
+        arr = self._get(f"/company/{company_id}").get("company") or []
+        return arr[0] if arr else {}
+
     def list_processos_page(self, page: int = 1, page_size: int = 50, *, archived: bool = True) -> dict:
         # Body mirrors the SPA's request (captured 22 Jul 2026 on pd/Loulé).
         # CRITICAL: filterAgencyId/filterCompanyId must be null, not 0 — with 0

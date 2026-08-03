@@ -401,3 +401,24 @@ O parágrafo de abertura é editável sem deploy: linha activa em `ds.msg_templa
 com `categoria='boas_vindas_email'`; placeholders `{{nome_cliente}}`,
 `{{nome_consultor}}`, `{{produto}}`, `{{loja}}`. Sem essa linha usa-se o texto por
 omissão do router.
+
+### 13.2 Dados fiscais da loja (migração 032)
+
+A tab **Configurações → Loja** mostra os dados fiscais **como estão no CRM**:
+denominação social, nome comercial, NIF, morada, contactos, capital social,
+gerência e o registo de intermediário de crédito no Banco de Portugal.
+
+Fonte: `GET /agency/{agencyId}` (a loja — a agência do JWT, que é a única que a
+conta alcança) e `GET /company/{companyId}` (a sociedade que a explora; o bloco
+`bankPt` traz registo, categoria, seguro de responsabilidade civil e órgão de
+administração). Dois endpoints que a plataforma não usava até aqui.
+
+`POST /api/settings/loja/fiscais/sincronizar` (capacidade `loja.edit`) lê o CRM e
+guarda a cópia em `loja_config`; `GET /api/settings/loja/fiscais` devolve só a
+cópia. Deliberado: a tab abre depressa e funciona com o CrediDesk em baixo, e
+`fiscais_atualizado_em` diz quando a cópia foi refrescada. São dados que mudam
+uma vez por ano. O snapshot completo fica em `loja_config.fiscais_raw` (jsonb),
+por isso o que hoje não é mostrado não obriga a nova migração.
+
+**Só de leitura na UI** — a fonte é o CRM; editar aqui criaria duas verdades para
+o mesmo NIF. Para corrigir, corrige-se no CrediDesk e sincroniza-se.

@@ -1227,8 +1227,86 @@ function LojaTab({ canEdit }: { canEdit: boolean }) {
       ) : (
         <p className="text-xs text-ink-400">Sem permissão para alterar os dados da loja.</p>
       )}
+      <DadosFiscais canEdit={canEdit} />
       {showCat && <CatalogoLojasDialog lojas={lojas} atual={data.numero} onClose={() => setShowCat(false)} onChange={() => mutCat()} />}
     </section>
+  );
+}
+
+type Fiscais = {
+  empresa_nome: string | null; empresa_nome_comercial: string | null; nif: string | null;
+  morada: string | null; codigo_postal: string | null; localidade: string | null;
+  concelho: string | null; distrito: string | null; telefone: string | null;
+  email: string | null; website: string | null; capital_social: number | null;
+  gerencia: string | null; registo_bp: string | null; categoria_bp: string | null;
+  agencia_nome: string | null; agencia_crm_id: number | null; empresa_crm_id: number | null;
+  fiscais_atualizado_em: string | null;
+};
+
+// Dados fiscais tal como estão no CrediDesk (agência + sociedade). Só de leitura:
+// a fonte é o CRM, e editá-los aqui criaria duas verdades para o mesmo NIF. O
+// botão traz a cópia mais recente; entre sincronizações lê-se o que está guardado,
+// para a tab abrir depressa e funcionar com o CRM em baixo.
+function DadosFiscais({ canEdit }: { canEdit: boolean }) {
+  const { data, mutate } = useSWR<{ fiscais: Fiscais }>('/api/settings/loja/fiscais', api);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const f = data?.fiscais;
+
+  async function sincronizar() {
+    setBusy(true); setMsg(null);
+    try {
+      await api('/api/settings/loja/fiscais/sincronizar', { method: 'POST' });
+      setMsg('✓ Actualizado a partir do CRM.'); mutate();
+    } catch (e: any) { setMsg(errDetail(e)); } finally { setBusy(false); }
+  }
+
+  const linhas: [string, string | null][] = [
+    ['Denominação social', f?.empresa_nome ?? null],
+    ['Nome comercial', f?.empresa_nome_comercial ?? null],
+    ['NIF', f?.nif ?? null],
+    ['Morada', f?.morada ?? null],
+    ['Código postal', [f?.codigo_postal, f?.localidade].filter(Boolean).join(' ') || null],
+    ['Concelho / distrito', [f?.concelho, f?.distrito].filter(Boolean).join(' · ') || null],
+    ['Telefone', f?.telefone ?? null],
+    ['Email', f?.email ?? null],
+    ['Capital social', f?.capital_social != null ? `${f.capital_social.toLocaleString('pt-PT')} €` : null],
+    ['Gerência', f?.gerencia ?? null],
+    ['Registo Banco de Portugal', [f?.registo_bp, f?.categoria_bp].filter(Boolean).join(' · ') || null],
+    ['Agência no CRM', f?.agencia_nome ? `${f.agencia_nome} (#${f.agencia_crm_id})` : null],
+  ];
+
+  return (
+    <div className="pt-3 border-t border-ink-100">
+      <p className="text-sm font-medium text-ink-700">Dados fiscais</p>
+      <p className="text-xs text-ink-400 mb-3">
+        Como estão no CrediDesk (agência + sociedade). Para os corrigir, altere no CRM e volte a sincronizar.
+      </p>
+      {!f || !f.fiscais_atualizado_em ? (
+        <p className="text-xs text-ink-400 mb-3">Ainda não foram importados do CRM.</p>
+      ) : (
+        <dl className="text-sm divide-y divide-ink-100 rounded-lg border border-ink-100">
+          {linhas.map(([k, v]) => (
+            <div key={k} className="flex gap-3 px-3 py-1.5">
+              <dt className="w-44 shrink-0 text-ink-400">{k}</dt>
+              <dd className="min-w-0 flex-1 break-words text-ink-900">{v || <span className="text-ink-300">—</span>}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      <div className="mt-3 flex items-center gap-3">
+        {canEdit && (
+          <button onClick={sincronizar} disabled={busy} className="btn-ghost">
+            {busy ? 'A ler o CRM …' : 'Actualizar do CRM'}
+          </button>
+        )}
+        <span className="text-xs text-ink-400">
+          {msg || (f?.fiscais_atualizado_em
+            ? `Actualizado a ${new Date(f.fiscais_atualizado_em).toLocaleString('pt-PT')}`
+            : '')}
+        </span>
+      </div>
+    </div>
   );
 }
 
