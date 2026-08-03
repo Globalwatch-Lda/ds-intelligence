@@ -25,6 +25,7 @@ from ..core.names import fix_name
 from ..core.scope import (
     acting_data_scope,
     apply_scope,
+    current_username,
     has_cap,
     require_cap,
     require_superadmin,
@@ -514,6 +515,32 @@ def get_loja_fiscais():
     return {"fiscais": row}
 
 
+def _crm_client(request: Request):
+    """Um cliente CrediDesk que funciona em QUALQUER instalação.
+
+    A Ramada tem as credenciais do CRM no `.env` (DS_CRM_USERNAME/PASSWORD); Loulé
+    não — lá vivem cifradas em `platform_users` (conta `pd`), como em qualquer loja
+    montada depois do scoping por utilizador. Um cliente que só olhasse para o env
+    dava 502 em Loulé, que foi exactamente o que aconteceu.
+
+    Preferimos a conta CRM de quem está a pedir (é a agência dele que interessa),
+    depois qualquer conta activa da loja, e só por fim o env.
+    """
+    from integrations.ds_crm.accounts import list_crm_accounts
+    from integrations.ds_crm.client import CredidekClient
+
+    eu = current_username(request)
+    contas = []
+    try:
+        contas = list_crm_accounts()
+    except Exception:
+        contas = []
+    escolhida = next((a for a in contas if a.username == eu), None) or (contas[0] if contas else None)
+    if escolhida:
+        return CredidekClient(email=escolhida.crm_email, password=escolhida.crm_password)
+    return CredidekClient()  # instalação de conta única, credenciais no .env
+
+
 def _morada_agencia(ag: dict, gi: dict) -> str:
     """A morada da LOJA (agência) quando existe; a da sede só como recurso — os
     dados fiscais que a loja imprime são os do estabelecimento onde atende."""
@@ -529,10 +556,8 @@ def sync_loja_fiscais(request: Request):
     editar pode refrescá-los. Read-only do lado do CRM, como todo o resto.
     """
     require_cap(request, "loja.edit")
-    from integrations.ds_crm.client import CredidekClient
-
     try:
-        c = CredidekClient()
+        c = _crm_client(request)
         ag = c.get_agency()
         if not ag:
             raise HTTPException(502, "O CRM não devolveu a agência desta conta.")
