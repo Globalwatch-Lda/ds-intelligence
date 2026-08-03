@@ -23,7 +23,7 @@ type Sinal = {
   severidade: 'alto' | 'medio' | 'baixo';
   titulo?: string;
   evidencia?: string;
-  verificacao: 'confirmado_dados' | 'a_verificar_no_ficheiro' | 'confirmado_ficheiro';
+  verificacao: 'confirmado_dados' | 'a_verificar_no_ficheiro' | 'confirmado_ficheiro' | 'forense_ficheiro';
   base_manual?: string;
   ficheiro?: string;
   documento?: string;
@@ -75,6 +75,8 @@ const VERIF_LABEL: Record<string, string> = {
   confirmado_dados: 'Confirmado pelos dados',
   a_verificar_no_ficheiro: 'A verificar no documento',
   confirmado_ficheiro: 'Confirmado no ficheiro',
+  // Fase 3: a prova está nos bytes do ficheiro, não no que a página mostra.
+  forense_ficheiro: 'Integridade do ficheiro',
 };
 
 export default function AnaliseDocumentalPage() {

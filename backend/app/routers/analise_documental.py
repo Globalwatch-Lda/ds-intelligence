@@ -321,6 +321,42 @@ def _media_type(file_name: str | None) -> str | None:
     return _MEDIA.get(ext)
 
 
+def _forense_sinais(b64: str, file_name: str, media_type: str, doc_nome: str, proponente: str) -> list[dict]:
+    """Sinais de ADULTERAÇÃO do ficheiro (metadados, guardas incrementais, EXIF).
+
+    Responde à pergunta que a leitura por visão não responde: o documento pode
+    estar impecável e ter sido editado no Sejda. Sem chamadas ao modelo — é
+    inspecção dos bytes — por isso não acrescenta custo nem latência sensível.
+    """
+    from ..core.analise_documental_kb import SINAIS_FICHEIRO
+    from ..core.forense_ficheiro import analisar
+
+    try:
+        dados = base64.b64decode(b64)
+    except Exception:
+        return []
+    sinais, _factos = analisar(dados, file_name, media_type)
+    base_por_id = {s["id"]: s["descricao"] for s in SINAIS_FICHEIRO}
+    return [
+        {
+            "id": s["id"],
+            "categoria": s["categoria"],
+            "severidade": s["severidade"],
+            "titulo": s["titulo"],
+            "evidencia": s["detalhe"],
+            # Distinto de "confirmado_ficheiro" (leitura por visão): aqui a prova
+            # está nos bytes, não no que a página mostra.
+            "verificacao": "forense_ficheiro",
+            "base_manual": base_por_id.get(s["id"]),
+            "ficheiro": file_name,
+            "documento": doc_nome,
+            "proponente": proponente,
+        }
+        for s in sinais
+        if s["id"] in base_por_id
+    ]
+
+
 def _vision_sinais(doc_nome: str, proponente: str, file_name: str, media_type: str, b64: str,
                    contexto: str = "") -> tuple[list[dict], dict]:
     """Lê UM ficheiro com o modelo de visão e devolve (sinais, factos):
@@ -552,6 +588,10 @@ def analisar_conteudo(referencia: str, request: Request):
             if len(b64) * 3 // 4 > max_bytes:
                 return None, {"ficheiro": fname, "motivo": f"ficheiro > {max_mb:g} MB"}, [], {}
             fsinais, ffactos = _vision_sinais(doc_nome, proponente, fname, mt, b64, contexto)
+            # Forense do próprio ficheiro: o modelo de visão lê o que o documento
+            # MOSTRA e nunca vê que os bytes foram editados no Sejda. Corre sobre
+            # o mesmo download, portanto não custa nem uma chamada a mais.
+            fsinais.extend(_forense_sinais(b64, fname, mt, doc_nome, proponente))
         except Exception as e:
             return None, {"ficheiro": fname, "motivo": f"erro na análise ({type(e).__name__})"}, [], {}
         return ({"ficheiro": fname, "documento": doc_nome, "proponente": proponente,
@@ -592,7 +632,12 @@ def analisar_conteudo(referencia: str, request: Request):
             "catálogo dos manuais internos. Sinais confirmados na leitura do ficheiro. "
             "Uma passagem final cruza os factos extraídos de todos os documentos para "
             "apanhar incoerências entre eles (ex.: IHT nos recibos que não consta no "
-            "total anual do IRS) — sinais marcados como 'cruzamento entre documentos'."
+            "total anual do IRS) — sinais marcados como 'cruzamento entre documentos'. "
+            "Cada ficheiro passa ainda por uma análise FORENSE dos seus bytes "
+            "(metadados PDF/XMP, guardas incrementais, anotações sobrepostas, EXIF), "
+            "que deteta edição por ferramentas como o Sejda ou o Photoshop mesmo "
+            "quando o documento se lê impecavelmente. Esses sinais indicam edição, "
+            "não falsificação: perante um, pede-se o original ao emitente."
         ),
         "fonte": FONTE,
         "as_of": datetime.now(timezone.utc).date().isoformat(),

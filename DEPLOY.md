@@ -422,3 +422,39 @@ por isso o que hoje não é mostrado não obriga a nova migração.
 
 **Só de leitura na UI** — a fonte é o CRM; editar aqui criaria duas verdades para
 o mesmo NIF. Para corrigir, corrige-se no CrediDesk e sincroniza-se.
+
+### 13.3 Análise Documental — Fase 3: integridade do ficheiro (Ago 2026)
+
+As Fases 1 e 2 olham para o que o documento **diz**; nenhuma responde a "este PDF
+foi editado?". Um recibo com o valor trocado no Sejda continua a ler-se
+perfeitamente — a fraude está no ficheiro, não no texto.
+
+`app/core/forense_ficheiro.py` lê os **bytes** de cada ficheiro (os mesmos que a
+Fase 2 já descarrega, portanto sem custo nem chamada extra) e procura:
+ferramenta de edição no `/Producer`/`/Creator` (Sejda, iLovePDF, Smallpdf,
+pdfFiller, Photoshop, GIMP…), histórico de edição no XMP, **guardas incrementais**
+(vários `%%EOF` = re-gravado depois de emitido), `ModDate` posterior a
+`CreationDate`, anotações `/FreeText` ou campos de formulário (escrever por cima
+de um scan), ausência total de metadados, e em imagens o EXIF (`Software`,
+data da fotografia vs data de gravação).
+
+Sem dependências novas — parsing directo dos bytes. Os sinais estão declarados em
+`SINAIS_FICHEIRO` (analise_documental_kb.py) e chegam ao relatório com
+`verificacao: "forense_ficheiro"`.
+
+**Assinatura digital**: gera SEMPRE uma guarda incremental. Sem essa distinção,
+todo o contrato assinado aparecia como adulterado — o sinal é despromovido a
+"baixo" e explica-se que só é grave se houver mais gravações do que assinaturas.
+
+Validado contra 8 ficheiros reais do CRM: 7 sem sinais (produtores legítimos —
+Microsoft Print To PDF, iText/JasperReports, Quartz macOS) e 1 contrato assinado
+digitalmente.
+
+**Verificar um ficheiro solto** (sem o carregar num processo):
+```
+cd ~/ds-engine/backend && venv/bin/python scripts/verificar_pdf.py /caminho/recibo.pdf
+```
+
+⚠️ Estes sinais indicam **edição**, não falsificação: um extrato pode ter passado
+por uma ferramenta online só para juntar páginas. O que mudam é o ónus — perante
+um recibo saído de um editor de PDF, pede-se o original ao emitente.

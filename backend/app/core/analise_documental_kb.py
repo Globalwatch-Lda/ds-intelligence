@@ -130,6 +130,44 @@ SINAIS_ALERTA: list[dict] = [
      "tipo": "estrutural"},
 ]
 
+# ---- Integridade do ficheiro (Fase 3, forense) ---------------------------
+# Estes sinais NÃO vêm dos manuais da DS: os manuais tratam do documento impresso
+# (logótipos, carimbos, aritmética) e são anteriores à facilidade com que hoje se
+# edita um PDF no browser. São detetados de forma DETERMINÍSTICA nos bytes do
+# ficheiro (app/core/forense_ficheiro.py), não por um modelo, e por isso não
+# entram no catálogo enviado ao modelo de visão — entram no relatório final.
+#
+# Nenhum destes sinais prova falsificação: provam EDIÇÃO. Um extrato pode ter
+# passado por uma ferramenta online só para juntar páginas. O que mudam é o ónus:
+# perante um recibo saído de um editor de PDF, pede-se o original ao emitente.
+FONTE_FORENSE = (
+    "Análise forense do ficheiro (metadados PDF/XMP, guardas incrementais, EXIF) — "
+    "complemento técnico aos manuais da DS, que cobrem o documento impresso"
+)
+
+SINAIS_FICHEIRO: list[dict] = [
+    {"id": "fich_editor", "categoria": "Integridade do ficheiro",
+     "descricao": "O ficheiro declara ter sido produzido ou alterado por uma ferramenta de edição "
+                  "(Sejda, iLovePDF, Smallpdf, pdfFiller, Photoshop, GIMP…). Documentos emitidos "
+                  "por bancos, entidades patronais ou pela AT saem do software dessas entidades."},
+    {"id": "fich_xmp_historico", "categoria": "Integridade do ficheiro",
+     "descricao": "O histórico XMP do ficheiro regista a passagem por um editor, mesmo que o campo "
+                  "de produtor tenha sido reescrito."},
+    {"id": "fich_guardas_incrementais", "categoria": "Integridade do ficheiro",
+     "descricao": "O PDF tem várias marcas de fim de ficheiro: foi aberto, alterado e re-gravado "
+                  "depois da emissão original. Normal em assinatura digital ou preenchimento de "
+                  "formulário; suspeito num recibo ou extrato."},
+    {"id": "fich_modificado_depois", "categoria": "Integridade do ficheiro",
+     "descricao": "A data de modificação é posterior à de criação (PDF), ou a data de gravação "
+                  "difere da data da fotografia (EXIF)."},
+    {"id": "fich_anotacoes", "categoria": "Integridade do ficheiro",
+     "descricao": "O ficheiro contém anotações de texto livre ou campos de formulário — a forma "
+                  "mais comum de escrever por cima de valores num documento digitalizado."},
+    {"id": "fich_sem_metadados", "categoria": "Integridade do ficheiro",
+     "descricao": "Ficheiro sem metadados de origem (produtor/criador no PDF, EXIF na fotografia). "
+                  "Típico de ficheiros passados por ferramentas online, que os limpam."},
+]
+
 # Verificação em fontes externas (Manual/Formação — "Em caso de dúvida").
 FONTES_EXTERNAS: list[str] = [
     "Certificados de contribuições fiscais/sociais: confirmar autenticidade junto da AT ou da Segurança Social (Segurança Social Direta).",
