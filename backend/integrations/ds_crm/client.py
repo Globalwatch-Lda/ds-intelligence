@@ -215,6 +215,29 @@ class CredidekClient:
         }
         return self._post("/customerspotential/leads/list", body)
 
+    def get_lead_historic(self, lead_id: int) -> list[dict]:
+        """Timeline da lead — o que a ficha do CrediDesk mostra na aba "Atividade".
+
+        Cada registo traz `createdOn`, `observation` (o texto da acção), `stateName`,
+        `typeId` e `agentName`. É a ÚNICA fonte do que foi feito: a lista de leads só
+        tem datas (`updatedon`), nunca o teor da intervenção. Endpoint capturado a
+        3 Ago 2026 na SPA (crm.dsicredito.pt/leads/<id>).
+
+        typeId observado: 0 = nota escrita pelo agente, 1 = evento de sistema
+        ("criou a lead", "arquivou a Lead com o motivo: ..."), -1 = arquivo
+        automático, 3 = evento sem texto. Devolve por ordem cronológica inversa
+        (mais recente primeiro); lista vazia se não houver histórico.
+        """
+        body = {
+            "stateId": 0,
+            "observation": "",
+            "customersPotentialLeadsId": lead_id,
+            "typeId": 0,
+        }
+        res = self._post("/customerspotential/leads/historic/list", body)
+        rows = res.get("customersPotentialleadshistoric") or []
+        return sorted(rows, key=lambda r: r.get("createdOn") or "", reverse=True)
+
     def iter_leads(self, page_size: int = 50, *, state_id: int = 0, archived: bool = False) -> Iterator[dict]:
         def fetch(page, ps):
             return self.list_leads_page(page=page, page_size=ps, state_id=state_id, archived=archived)

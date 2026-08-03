@@ -1,6 +1,9 @@
 'use client';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { api } from '../../lib/api';
+import LeadNotas, { IconSino, type ResumoNotas } from '../../components/LeadNotas';
 
 type Lead = {
   id: string;
@@ -13,22 +16,84 @@ type Lead = {
   consultor_nome: string | null;
   status: string;
   ultima_acao: string | null;
+  // O QUE foi a última intervenção, tal como registada no CRM (aba "Atividade"
+  // da ficha da lead). Nulo enquanto o ingest nocturno não passar pela lead.
+  ultima_acao_texto: string | null;
+  ultima_acao_agente: string | null;
+  ultima_acao_tipo: number | null;
+  acoes_total: number | null;
   created_at: string;
 };
 
 // Estados de lead fechados no CrediDesk (não contam como dormentes).
 const CLOSED = new Set(['Concluido', 'Concluído', 'Perdido']);
 
+const fmtData = (v: string | null) => (v ? new Date(v).toLocaleDateString('pt-PT') : '—');
+
+// useSearchParams obriga a uma fronteira de Suspense: sem ela o Next não
+// consegue pré-renderizar a página e o build falha (missing-suspense-with-csr-bailout).
 export default function LeadsPage() {
+  return (
+    <Suspense fallback={<p className="text-ink-400 text-sm">A carregar leads…</p>}>
+      <LeadsConteudo />
+    </Suspense>
+  );
+}
+
+function LeadsConteudo() {
   const { data } = useSWR<{ leads: Lead[] }>('/api/leads/list', api);
+  const { data: resumo, mutate: recarregarResumo } = useSWR<{ por_lead: ResumoNotas }>(
+    '/api/lead-notas/resumo',
+    api,
+  );
+  const params = useSearchParams();
+  const [aberta, setAberta] = useState<Lead | null>(null);
 
   const leads = data?.leads || [];
+  const notas = resumo?.por_lead || {};
+
+  // Link do sino/email (`/leads?lead=<crm_id>`) abre logo o painel dessa lead.
+  const leadParam = params.get('lead');
+  useEffect(() => {
+    if (!leadParam || !leads.length) return;
+    const alvo = leads.find((l) => l.id === leadParam);
+    if (alvo) setAberta(alvo);
+  }, [leadParam, leads]);
 
   const dormentes = leads.filter((l) => {
     if (!l.ultima_acao || CLOSED.has(l.status)) return false;
     const diff = (Date.now() - new Date(l.ultima_acao).getTime()) / 86400000;
     return diff > 30;
   });
+
+  function BotaoNotas({ lead }: { lead: Lead }) {
+    const info = notas[lead.id];
+    const cor = info?.vencido
+      ? 'text-ds-600'
+      : info?.proximo_lembrete
+      ? 'text-amber-500'
+      : info?.notas
+      ? 'text-ink-700'
+      : 'text-ink-300';
+    const titulo = info?.vencido
+      ? 'Lembrete por tratar'
+      : info?.proximo_lembrete
+      ? `Lembrete a ${new Date(info.proximo_lembrete).toLocaleString('pt-PT')}`
+      : info?.notas
+      ? `${info.notas} nota(s)`
+      : 'Adicionar nota / lembrete';
+    return (
+      <button
+        type="button"
+        title={titulo}
+        onClick={() => setAberta(lead)}
+        className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 hover:bg-ink-50 ${cor}`}
+      >
+        <IconSino />
+        {!!info?.notas && <span className="text-xs">{info.notas}</span>}
+      </button>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -57,9 +122,13 @@ export default function LeadsPage() {
                     {l.produto || '—'} · {l.consultor_nome || 'por atribuir'}
                   </div>
                 </div>
-                <div className="text-ink-400 text-xs shrink-0">
-                  última acção:{' '}
-                  {l.ultima_acao ? new Date(l.ultima_acao).toLocaleDateString('pt-PT') : '—'}
+                <div className="text-ink-400 text-xs shrink-0 text-right">
+                  <div>última acção: {fmtData(l.ultima_acao)}</div>
+                  {l.ultima_acao_texto && (
+                    <div className="max-w-[320px] truncate" title={l.ultima_acao_texto}>
+                      {l.ultima_acao_texto}
+                    </div>
+                  )}
                 </div>
               </li>
             ))}
@@ -82,24 +151,47 @@ export default function LeadsPage() {
                 <th className="py-2">Consultor</th>
                 <th className="py-2">Status</th>
                 <th className="py-2">Última acção</th>
+                <th className="py-2 text-center">Notas</th>
               </tr>
             </thead>
             <tbody>
               {leads.map((l) => (
-                <tr key={l.id} className="border-b border-ink-100/60 last:border-0">
+                <tr key={l.id} className="border-b border-ink-100/60 last:border-0 align-top">
                   <td className="py-2 text-ink-900">{l.nome}</td>
                   <td className="py-2 text-ink-700">{l.produto || '—'}</td>
                   <td className="py-2 text-ink-700">{l.consultor_nome || <span className="text-ink-300">— por atribuir —</span>}</td>
                   <td className="py-2"><span className="chip">{l.status || '—'}</span></td>
-                  <td className="py-2 text-ink-400 text-xs">
-                    {l.ultima_acao ? new Date(l.ultima_acao).toLocaleDateString('pt-PT') : '—'}
+                  <td className="py-2 max-w-[380px]">
+                    {l.ultima_acao_texto ? (
+                      <>
+                        <div className="text-ink-700 line-clamp-2" title={l.ultima_acao_texto}>
+                          {l.ultima_acao_texto}
+                        </div>
+                        <div className="text-ink-400 text-xs">
+                          {fmtData(l.ultima_acao)}
+                          {l.ultima_acao_agente ? ` · ${l.ultima_acao_agente}` : ''}
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-ink-400 text-xs">{fmtData(l.ultima_acao)}</span>
+                    )}
                   </td>
+                  <td className="py-2 text-center"><BotaoNotas lead={l} /></td>
                 </tr>
               ))}
             </tbody>
           </table></div>
         )}
       </div>
+
+      {aberta && (
+        <LeadNotas
+          leadId={aberta.id}
+          leadNome={aberta.nome}
+          onClose={() => setAberta(null)}
+          onMudou={() => recarregarResumo()}
+        />
+      )}
     </div>
   );
 }

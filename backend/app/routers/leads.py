@@ -22,9 +22,28 @@ router = APIRouter()
 CLOSED_STATES = {"Concluido", "Concluído", "Perdido", "Anulado"}
 
 
+def _texto_acao(r: dict) -> str | None:
+    """O que foi a última intervenção, em texto legível.
+
+    O CRM guarda o teor da acção em `observation` — nota escrita pelo consultor
+    (typeId 0) ou evento de sistema (typeId 1/-1: "criou a lead", "arquivou a Lead
+    com o motivo: ..."). Quando o registo não traz texto (typeId 3), cai para o
+    estado que a lead tomou nesse momento, que é a única informação útil que resta.
+    HTML solto (<br />) aparece nas mensagens de arquivo — limpo aqui, porque a
+    tabela do frontend mostra texto, não markup.
+    """
+    texto = (r.get("last_action_text") or "").replace("<br />", " ").replace("<br>", " ").strip()
+    if texto:
+        return " ".join(texto.split())
+    estado = r.get("last_action_state")
+    return f"Estado: {estado}" if estado else None
+
+
 def _shape(r: dict) -> dict:
     """Map a leads_real row to the shape the frontend Lead table expects."""
-    ultima = r.get("updated_on_crm") or r.get("created_on_crm")
+    # Data da última acção: a do histórico do CRM quando a temos (é a real), senão
+    # o `updatedon` da lead — que marca qualquer edição, não uma intervenção.
+    ultima = r.get("last_action_at") or r.get("updated_on_crm") or r.get("created_on_crm")
     return {
         "id": str(r.get("crm_id")),
         "nome": r.get("name"),
@@ -36,6 +55,10 @@ def _shape(r: dict) -> dict:
         "consultor_nome": fix_name(r.get("manager_name")),
         "status": r.get("state_name"),  # Pendente / Concluido / Perdido
         "ultima_acao": ultima,
+        "ultima_acao_texto": _texto_acao(r),
+        "ultima_acao_agente": fix_name(r.get("last_action_agent")),
+        "ultima_acao_tipo": r.get("last_action_type"),
+        "acoes_total": r.get("last_action_count"),
         "created_at": r.get("created_on_crm"),
     }
 
@@ -47,7 +70,9 @@ def list_leads(request: Request, limit: int = 1000):
     q = apply_scope(
         sb.table("leads_real").select(
             "crm_id, name, telephone, email, type_name, manager_name, "
-            "state_name, archived, updated_on_crm, created_on_crm"
+            "state_name, archived, updated_on_crm, created_on_crm, "
+            "last_action_at, last_action_text, last_action_type, last_action_state, "
+            "last_action_agent, last_action_count"
         ),
         scope,
     )

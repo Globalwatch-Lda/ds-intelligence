@@ -13,6 +13,7 @@ import {
 } from '@globalwatch-lda/synertia-ui';
 import { IconDocScan } from './icons';
 import ChatDock from './ChatDock';
+import LembretesDock from './LembretesDock';
 import UserFooter from './UserFooter';
 import { AboutDialog } from './AboutDialog';
 import { useMe } from '../lib/useMe';
@@ -126,6 +127,9 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
         {children}
       </SynertiaShell>
       {pathname !== '/login' && <ChatDock />}
+      {/* Sino de lembretes das leads: global de propósito — um aviso marcado para
+          as 9h tem de aparecer esteja o utilizador em que página estiver. */}
+      {pathname !== '/login' && <LembretesDock />}
       <AboutDialog
         open={aboutOpen}
         onClose={() => setAboutOpen(false)}

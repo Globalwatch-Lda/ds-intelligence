@@ -100,10 +100,10 @@ verão). Logs: `~/ds-sync.log` (Ramada) e `~/dsl-sync.log` (Loulé).
 |---|---|
 | 02:00 daily | `ingest_customers.py` — refresh `ds.clientes_real` (~1.1k, ~30s) |
 | 02:20 daily | `ingest_processos.py` — refresh `ds.processos_real` (~187) |
-| 02:40 daily | `ingest_leads.py` — refresh `ds.leads_real` (~420) |
+| 02:40 daily | `ingest_leads.py` — refresh `ds.leads_real` (~420) + última acção de cada lead (histórico do CRM, uma chamada por lead: +~2 min) |
 | 03:00 Monday | `ingest_consent.py --stale-days 7` — refresh marketing-consent on `clientes_real` |
 | 03:10 / 03:30 / 03:50 / 04:10 Mon | os mesmos quatro para **Loulé** (`~/ds-engine-loule`, schema `dsl`) |
-| cada minuto | `run_dispatcher.py` — fila de envios multicanal (um por loja; logs `~/ds-dispatch.log`, `~/dsl-dispatch.log`) |
+| cada minuto | `run_dispatcher.py` — fila de envios multicanal **+ lembretes de notas de leads por email** (um por loja; logs `~/ds-dispatch.log`, `~/dsl-dispatch.log`) |
 | cada 2 min | `auto-deploy.sh` — ver §1.3 |
 
 Each worker self-mints a fresh CrediDesk JWT via **headless Chromium**
@@ -340,3 +340,36 @@ Notes:
   presence, the FastAPI middleware validates its signature on every `/api/*`.
 - Per-user accounts / Coordenador-vs-Gestor roles are a later step (need the
   loja-coordinator login).
+
+---
+
+## 13. Última acção das leads + notas com lembrete (Ago 2026)
+
+**a) Última acção (coluna na página de Leads).** A lista de leads do CrediDesk só
+traz datas — `updatedon` diz *quando* alguém mexeu, nunca *o quê*. O teor da
+intervenção vem de `POST /customerspotential/leads/historic/list`
+(`{stateId:0, observation:"", customersPotentialLeadsId:<id>, typeId:0}`), o mesmo
+que a ficha da lead mostra na aba "Atividade": `createdOn`, `observation`,
+`stateName`, `typeId`, `agentName`. `ingest_leads.py` faz uma chamada por lead
+depois do upsert da lista e guarda só o registo mais recente em
+`leads_real.last_action_*` (migração **029**). `--sem-historico` salta essa fase.
+`typeId`: 0 = nota do consultor, 1 = evento de sistema ("criou a lead", "arquivou
+a Lead com o motivo: …"), -1 = arquivo automático, 3 = evento sem texto.
+
+**b) Notas com data + lembrete.** Tabela `ds.lead_notas` (migração **030**),
+router `/api/lead-notas`, painel no ícone de sino de cada linha da tabela de Leads.
+Escreve **só na plataforma** — os workers CrediDesk continuam read-only (§3).
+Visibilidade decidida com o cliente (3 Ago 2026): o lembrete avisa **quem o criou**;
+quem tem perfil com `data_scope='loja'` (Diretor de Loja, admins) vê as notas todas.
+
+O aviso tem dois canais: o sino da plataforma (componente `LembretesDock`, polling
+de 60s, abre-se sozinho quando um lembrete vence com a app aberta) e email ao
+próprio, enviado por `app/core/lembretes.py` a partir do `run_dispatcher.py` — vive
+lá porque precisa da mesma cadência de minuto a minuto e assim não há mais uma
+entrada de crontab para manter em cada loja. O email usa o mailer SES directo
+(como a recuperação de password), **não** a fila `ds.envios`, que existe para
+respeitar limites e opt-outs de destinatários externos.
+
+**Aplicar (as duas lojas):** correr `migrations/029_leads_ultima_acao.sql` e
+`030_lead_notas.sql` com `set search_path to ds` e depois `to dsl`. Feito a
+3 Ago 2026 nos dois schemas.
