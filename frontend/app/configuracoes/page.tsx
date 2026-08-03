@@ -1186,6 +1186,7 @@ function LojaTab({ canEdit }: { canEdit: boolean }) {
 
   if (!data) return <p className="text-sm text-ink-400">A carregar …</p>;
   return (
+    <div className="space-y-4">
     <section className="card max-w-md space-y-4">
       {/* Que loja É esta instalação. Fixa para todos; só o superadmin (sentinela)
           a troca, porque muda a identidade da instalação inteira. */}
@@ -1227,9 +1228,12 @@ function LojaTab({ canEdit }: { canEdit: boolean }) {
       ) : (
         <p className="text-xs text-ink-400">Sem permissão para alterar os dados da loja.</p>
       )}
-      <DadosFiscais canEdit={canEdit} />
       {showCat && <CatalogoLojasDialog lojas={lojas} atual={data.numero} onClose={() => setShowCat(false)} onChange={() => mutCat()} />}
     </section>
+    {/* Cartão à parte e mais largo: em coluna estreita os treze campos fiscais
+        empilhavam-se e obrigavam a rolar a página para ver o NIF. */}
+    <DadosFiscais canEdit={canEdit} />
+    </div>
   );
 }
 
@@ -1261,23 +1265,25 @@ function DadosFiscais({ canEdit }: { canEdit: boolean }) {
     } catch (e: any) { setMsg(errDetail(e)); } finally { setBusy(false); }
   }
 
-  const linhas: [string, string | null][] = [
-    ['Denominação social', f?.empresa_nome ?? null],
-    ['Nome comercial', f?.empresa_nome_comercial ?? null],
-    ['NIF', f?.nif ?? null],
-    ['Morada', f?.morada ?? null],
-    ['Código postal', [f?.codigo_postal, f?.localidade].filter(Boolean).join(' ') || null],
-    ['Concelho / distrito', [f?.concelho, f?.distrito].filter(Boolean).join(' · ') || null],
-    ['Telefone', f?.telefone ?? null],
-    ['Email', f?.email ?? null],
-    ['Capital social', f?.capital_social != null ? `${f.capital_social.toLocaleString('pt-PT')} €` : null],
-    ['Gerência', f?.gerencia ?? null],
-    ['Registo Banco de Portugal', [f?.registo_bp, f?.categoria_bp].filter(Boolean).join(' · ') || null],
-    ['Agência no CRM', f?.agencia_nome ? `${f.agencia_nome} (#${f.agencia_crm_id})` : null],
+  // `largo` = campo que ocupa duas colunas (morada, denominação social) — são os
+  // únicos textos longos; espremê-los numa coluna partia-os em três linhas.
+  const campos: { k: string; v: string | null; largo?: boolean }[] = [
+    { k: 'Denominação social', v: f?.empresa_nome ?? null, largo: true },
+    { k: 'Nome comercial', v: f?.empresa_nome_comercial ?? null },
+    { k: 'NIF', v: f?.nif ?? null },
+    { k: 'Morada', v: f?.morada ?? null, largo: true },
+    { k: 'Código postal / localidade', v: [f?.codigo_postal, f?.localidade].filter(Boolean).join(' ') || null },
+    { k: 'Concelho / distrito', v: [f?.concelho, f?.distrito].filter(Boolean).join(' · ') || null },
+    { k: 'Telefone', v: f?.telefone ?? null },
+    { k: 'Email', v: f?.email ?? null },
+    { k: 'Capital social', v: f?.capital_social != null ? `${f.capital_social.toLocaleString('pt-PT')} €` : null },
+    { k: 'Gerência', v: f?.gerencia ?? null },
+    { k: 'Registo Banco de Portugal', v: [f?.registo_bp, f?.categoria_bp].filter(Boolean).join(' · ') || null },
+    { k: 'Agência no CRM', v: f?.agencia_nome ? `${f.agencia_nome} (#${f.agencia_crm_id})` : null },
   ];
 
   return (
-    <div className="pt-3 border-t border-ink-100">
+    <section className="card max-w-4xl">
       <p className="text-sm font-medium text-ink-700">Dados fiscais</p>
       <p className="text-xs text-ink-400 mb-3">
         Como estão no CrediDesk (agência + sociedade). Para os corrigir, altere no CRM e volte a sincronizar.
@@ -1285,11 +1291,11 @@ function DadosFiscais({ canEdit }: { canEdit: boolean }) {
       {!f || !f.fiscais_atualizado_em ? (
         <p className="text-xs text-ink-400 mb-3">Ainda não foram importados do CRM.</p>
       ) : (
-        <dl className="text-sm divide-y divide-ink-100 rounded-lg border border-ink-100">
-          {linhas.map(([k, v]) => (
-            <div key={k} className="flex gap-3 px-3 py-1.5">
-              <dt className="w-44 shrink-0 text-ink-400">{k}</dt>
-              <dd className="min-w-0 flex-1 break-words text-ink-900">{v || <span className="text-ink-300">—</span>}</dd>
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-3 rounded-lg border border-ink-100 p-4 sm:grid-cols-2 lg:grid-cols-4">
+          {campos.map(({ k, v, largo }) => (
+            <div key={k} className={`min-w-0 ${largo ? 'sm:col-span-2' : ''}`}>
+              <dt className="text-xs text-ink-400">{k}</dt>
+              <dd className="break-words text-sm text-ink-900">{v || <span className="text-ink-300">—</span>}</dd>
             </div>
           ))}
         </dl>
@@ -1306,7 +1312,7 @@ function DadosFiscais({ canEdit }: { canEdit: boolean }) {
             : '')}
         </span>
       </div>
-    </div>
+    </section>
   );
 }
 
