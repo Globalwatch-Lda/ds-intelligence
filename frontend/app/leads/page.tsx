@@ -1,9 +1,11 @@
 'use client';
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import useSWR from 'swr';
+import useSWR, { useSWRConfig } from 'swr';
 import { api } from '../../lib/api';
 import LeadNotas, { IconSino, type ResumoNotas } from '../../components/LeadNotas';
+import LeadBoasVindas, { IconEnvelope } from '../../components/LeadBoasVindas';
+import { useMe } from '../../lib/useMe';
 
 type Lead = {
   id: string;
@@ -22,6 +24,9 @@ type Lead = {
   ultima_acao_agente: string | null;
   ultima_acao_tipo: number | null;
   acoes_total: number | null;
+  // Lead por trabalhar: ninguém registou contacto no CRM (só "criou a lead").
+  nova: boolean;
+  boas_vindas_em: string | null;
   created_at: string;
 };
 
@@ -47,9 +52,14 @@ function LeadsConteudo() {
     api,
   );
   const params = useSearchParams();
+  const { caps } = useMe();
   const [aberta, setAberta] = useState<Lead | null>(null);
+  const [emailPara, setEmailPara] = useState<Lead | null>(null);
+  const { mutate: recarregarLeads } = useSWRConfig();
 
   const leads = data?.leads || [];
+  const novas = leads.filter((l) => l.nova);
+  const podeEnviar = caps.has('messaging.send');
   const notas = resumo?.por_lead || {};
 
   // Link do sino/email (`/leads?lead=<crm_id>`) abre logo o painel dessa lead.
@@ -91,6 +101,30 @@ function LeadsConteudo() {
       >
         <IconSino />
         {!!info?.notas && <span className="text-xs">{info.notas}</span>}
+      </button>
+    );
+  }
+
+  function BotaoEmail({ lead }: { lead: Lead }) {
+    const enviado = !!lead.boas_vindas_em;
+    if (!podeEnviar) return null;
+    return (
+      <button
+        type="button"
+        title={
+          !lead.email
+            ? 'Lead sem email no CRM'
+            : enviado
+            ? `Boas-vindas enviadas a ${new Date(lead.boas_vindas_em!).toLocaleDateString('pt-PT')}`
+            : 'Enviar email de boas-vindas com os documentos necessários'
+        }
+        disabled={!lead.email}
+        onClick={() => setEmailPara(lead)}
+        className={`inline-flex items-center rounded-lg px-2 py-1 hover:bg-ink-50 disabled:opacity-30 disabled:hover:bg-transparent ${
+          enviado ? 'text-emerald-600' : 'text-ink-400'
+        }`}
+      >
+        <IconEnvelope />
       </button>
     );
   }
@@ -139,6 +173,11 @@ function LeadsConteudo() {
       <div className="card">
         <h3 className="text-base font-semibold text-ink-900 mb-3">
           Todas as leads <span className="chip ml-2">{leads.length}</span>
+          {novas.length > 0 && (
+            <span className="chip chip-alert ml-2" title="Sem contacto registado no CRM">
+              {novas.length} novas
+            </span>
+          )}
         </h3>
         {!leads.length ? (
           <p className="text-ink-400 text-sm">Sem leads no âmbito da sua carteira.</p>
@@ -151,16 +190,26 @@ function LeadsConteudo() {
                 <th className="py-2">Consultor</th>
                 <th className="py-2">Status</th>
                 <th className="py-2">Última acção</th>
-                <th className="py-2 text-center">Notas</th>
+                <th className="py-2 text-center">Acções</th>
               </tr>
             </thead>
             <tbody>
               {leads.map((l) => (
-                <tr key={l.id} className="border-b border-ink-100/60 last:border-0 align-top">
-                  <td className="py-2 text-ink-900">{l.nome}</td>
+                // Leads novas (sem contacto registado no CRM) a negrito — é a fila
+                // de trabalho de quem abre a página.
+                <tr key={l.id}
+                    className={`border-b border-ink-100/60 last:border-0 align-top ${l.nova ? 'font-semibold' : ''}`}>
+                  <td className="py-2 text-ink-900">
+                    {l.nome}
+                    {l.nova && (
+                      <span className="chip chip-alert ml-2 font-medium" title="Sem contacto registado no CRM">
+                        nova
+                      </span>
+                    )}
+                  </td>
                   <td className="py-2 text-ink-700">{l.produto || '—'}</td>
                   <td className="py-2 text-ink-700">{l.consultor_nome || <span className="text-ink-300">— por atribuir —</span>}</td>
-                  <td className="py-2"><span className="chip">{l.status || '—'}</span></td>
+                  <td className="py-2"><span className="chip font-medium">{l.status || '—'}</span></td>
                   <td className="py-2 max-w-[380px]">
                     {l.ultima_acao_texto ? (
                       <>
@@ -176,7 +225,12 @@ function LeadsConteudo() {
                       <span className="text-ink-400 text-xs">{fmtData(l.ultima_acao)}</span>
                     )}
                   </td>
-                  <td className="py-2 text-center"><BotaoNotas lead={l} /></td>
+                  <td className="py-2">
+                    <div className="flex items-center justify-center gap-1">
+                      <BotaoNotas lead={l} />
+                      <BotaoEmail lead={l} />
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -190,6 +244,15 @@ function LeadsConteudo() {
           leadNome={aberta.nome}
           onClose={() => setAberta(null)}
           onMudou={() => recarregarResumo()}
+        />
+      )}
+
+      {emailPara && (
+        <LeadBoasVindas
+          leadId={emailPara.id}
+          onClose={() => setEmailPara(null)}
+          // Recarrega a lista para o envelope passar a verde sem refrescar a página.
+          onEnviado={() => recarregarLeads('/api/leads/list')}
         />
       )}
     </div>

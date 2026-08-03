@@ -373,3 +373,31 @@ respeitar limites e opt-outs de destinatários externos.
 **Aplicar (as duas lojas):** correr `migrations/029_leads_ultima_acao.sql` e
 `030_lead_notas.sql` com `set search_path to ds` e depois `to dsl`. Feito a
 3 Ago 2026 nos dois schemas.
+
+### 13.1 Leads novas + email de boas-vindas (migração 031)
+
+**Lead nova** = ninguém lhe tocou no CRM. `ingest_leads.py` conta em
+`leads_real.interacoes_agente` os registos do histórico escritos por uma pessoa
+(`typeId 0`); zero ⇒ a página mostra a lead **a negrito** com o chip "nova".
+Contar o histórico todo não servia: "criou a lead" (typeId 1) e "Lead arquivada
+automáticamente" (-1) são do sistema. Enquanto o ingest nocturno não passar pela
+lead o campo é nulo e o router cai no sinal antigo (`last_action_count == 1` e
+tipo ≠ 0).
+
+**Email de boas-vindas** — botão de envelope na linha da lead, gated por
+`messaging.send`:
+`GET /api/leads/{id}/boas-vindas` devolve a pré-visualização (destinatário,
+assunto, documentos, HTML) e `POST` envia. Sai pela **fila multicanal** (canal
+`email`) com `send_pending_now` — um destinatário só não beneficia do espaçamento
+em lotes, e esperar pelo worker lê-se como avaria. Cada envio fica em
+`ds.lead_emails` (é isso que pinta o envelope de verde e alimenta `boas_vindas_em`).
+
+A checklist vem de `app/core/documentos_credito.py`, **derivada das checklists
+reais do CRM** (`documentsProponents` de 4 processos por tipo, 10 tipos, 3 Ago
+2026) — só os obrigatórios, por decisão do cliente. Ao mudar a checklist no CRM,
+voltar a derivar o ficheiro em vez de o editar de memória.
+
+O parágrafo de abertura é editável sem deploy: linha activa em `ds.msg_templates`
+com `categoria='boas_vindas_email'`; placeholders `{{nome_cliente}}`,
+`{{nome_consultor}}`, `{{produto}}`, `{{loja}}`. Sem essa linha usa-se o texto por
+omissão do router.

@@ -64,11 +64,18 @@ def normalise(row: dict) -> dict:
 
 
 def resumo_ultima_acao(hist: list[dict]) -> dict:
-    """Campos last_action_* a partir do histórico (já ordenado, recente primeiro)."""
+    """Campos last_action_* a partir do histórico (já ordenado, recente primeiro).
+
+    `interacoes_agente` conta só os registos escritos por uma pessoa (typeId 0).
+    É isso que separa uma lead POR TRABALHAR de uma já contactada: "criou a lead"
+    (typeId 1) e "Lead arquivada automáticamente" (-1) são do sistema e não contam.
+    """
+    interacoes = sum(1 for h in hist if h.get("typeId") == 0)
     if not hist:
         return {
             "last_action_at": None, "last_action_text": None, "last_action_type": None,
             "last_action_state": None, "last_action_agent": None, "last_action_count": 0,
+            "interacoes_agente": 0,
         }
     h = hist[0]
     texto = (h.get("observation") or "").strip() or None
@@ -79,6 +86,7 @@ def resumo_ultima_acao(hist: list[dict]) -> dict:
         "last_action_state": h.get("stateName"),
         "last_action_agent": h.get("agentName"),
         "last_action_count": len(hist),
+        "interacoes_agente": interacoes,
     }
 
 
