@@ -1150,6 +1150,7 @@ function ModulosTab() {
 type LojaCfg = {
   numero: string | null; nome: string | null;
   analise_max_ficheiros: number | null; analise_max_file_mb: number | null;
+  analise_forense_ativa: boolean;
 };
 type LojaCatalogo = { numero: string; nome: string };
 
@@ -1159,7 +1160,9 @@ function LojaTab({ canEdit }: { canEdit: boolean }) {
   const { data, mutate } = useSWR<LojaCfg>('/api/settings/loja', api);
   const { data: cat, mutate: mutCat } = useSWR<{ lojas: LojaCatalogo[] }>('/api/settings/lojas', api);
   const lojas = cat?.lojas ?? [];
-  const [f, setF] = useState({ numero: '', nome: '', analise_max_ficheiros: '', analise_max_file_mb: '' });
+  const [f, setF] = useState({
+    numero: '', nome: '', analise_max_ficheiros: '', analise_max_file_mb: '', analise_forense_ativa: true,
+  });
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showCat, setShowCat] = useState(false);
@@ -1169,6 +1172,7 @@ function LojaTab({ canEdit }: { canEdit: boolean }) {
       numero: data.numero ?? '', nome: data.nome ?? '',
       analise_max_ficheiros: String(data.analise_max_ficheiros ?? ''),
       analise_max_file_mb: String(data.analise_max_file_mb ?? ''),
+      analise_forense_ativa: data.analise_forense_ativa !== false,
     });
   }, [data]);
 
@@ -1179,6 +1183,7 @@ function LojaTab({ canEdit }: { canEdit: boolean }) {
         numero: f.numero, nome: f.nome,
         analise_max_ficheiros: f.analise_max_ficheiros === '' ? null : Number(f.analise_max_ficheiros),
         analise_max_file_mb: f.analise_max_file_mb === '' ? null : Number(f.analise_max_file_mb),
+        analise_forense_ativa: f.analise_forense_ativa,
       }) });
       setMsg('✓ Loja atualizada.'); mutate();
     } catch (e: any) { setMsg(`Erro: ${e.message}`); } finally { setBusy(false); }
@@ -1218,6 +1223,21 @@ function LojaTab({ canEdit }: { canEdit: boolean }) {
           <Field label="Tamanho máx. por ficheiro (MB, 0.5–32)" type="number" value={f.analise_max_file_mb}
                  onChange={(e) => setF({ ...f, analise_max_file_mb: e.target.value })} disabled={!canEdit} />
         </div>
+
+        {/* Fase 3: integridade do ficheiro. Sem custo (não chama o modelo), por
+            isso vem ligada; o interruptor existe para a loja a calar se decidir
+            que os sinais de edição lhe dão ruído a mais. */}
+        <label className="mt-3 flex items-start gap-2 text-sm text-ink-700">
+          <input type="checkbox" className="mt-0.5" checked={f.analise_forense_ativa} disabled={!canEdit}
+                 onChange={(e) => setF({ ...f, analise_forense_ativa: e.target.checked })} />
+          <span>
+            Validar se os documentos foram alterados
+            <span className="block text-xs text-ink-400">
+              Procura vestígios de edição nos próprios ficheiros — Sejda, iLovePDF, Photoshop,
+              gravações sucessivas, texto sobreposto, EXIF. Não tem custo por ficheiro.
+            </span>
+          </span>
+        </label>
       </div>
 
       {canEdit ? (

@@ -451,7 +451,7 @@ def get_loja():
     from ..config import settings
     sb = supabase()
     row = (sb.table("loja_config")
-           .select("numero, nome, analise_max_ficheiros, analise_max_file_mb")
+           .select("numero, nome, analise_max_ficheiros, analise_max_file_mb, analise_forense_ativa")
            .eq("id", 1).limit(1).execute().data or [{}])[0]
     return {
         "numero": row.get("numero"),
@@ -459,6 +459,9 @@ def get_loja():
         # limites da Análise Documental (Fase 2): DB > env default
         "analise_max_ficheiros": row.get("analise_max_ficheiros") or settings.ANALISE_MAX_FICHEIROS,
         "analise_max_file_mb": row.get("analise_max_file_mb") or settings.ANALISE_MAX_FILE_MB,
+        # Fase 3 (integridade do ficheiro). `is not False` e não `or True`: uma
+        # loja que a desligou tem de continuar desligada.
+        "analise_forense_ativa": row.get("analise_forense_ativa") is not False,
     }
 
 
@@ -467,6 +470,7 @@ class LojaIn(BaseModel):
     nome: str | None = None
     analise_max_ficheiros: int | None = None
     analise_max_file_mb: float | None = None
+    analise_forense_ativa: bool | None = None
 
 
 @router.put("/loja")
@@ -491,6 +495,8 @@ def put_loja(body: LojaIn, request: Request):
         upd["analise_max_ficheiros"] = max(1, min(int(body.analise_max_ficheiros), 50))
     if body.analise_max_file_mb is not None:
         upd["analise_max_file_mb"] = max(0.5, min(float(body.analise_max_file_mb), 32))
+    if body.analise_forense_ativa is not None:
+        upd["analise_forense_ativa"] = bool(body.analise_forense_ativa)
     sb.table("loja_config").update(upd).eq("id", 1).execute()
     return {"ok": True}
 

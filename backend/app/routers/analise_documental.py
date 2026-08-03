@@ -59,6 +59,21 @@ def _limites() -> tuple[int, float]:
     return n, mb
 
 
+def _forense_ativa() -> bool:
+    """Fase 3 (integridade do ficheiro) ligada? Configurável na tab Loja.
+
+    Falha para LIGADO: é o comportamento pedido pelo cliente e sem custo. Só um
+    `false` explícito na configuração a desliga — um erro de leitura da BD não
+    pode silenciar uma análise de fraude.
+    """
+    try:
+        row = (supabase().table("loja_config")
+               .select("analise_forense_ativa").eq("id", 1).limit(1).execute().data or [{}])[0]
+        return row.get("analise_forense_ativa") is not False
+    except Exception:
+        return True
+
+
 def _parse_date(s: str | None) -> date | None:
     if not s:
         return None
@@ -557,6 +572,9 @@ def analisar_conteudo(referencia: str, request: Request):
     ficheiros = lst.get("documents") or []
     limite, max_mb = _limites()
     max_bytes = int(max_mb * 1024 * 1024)
+    # Lido uma vez e passado às tarefas: dentro do ThreadPool, uma consulta por
+    # ficheiro à mesma linha de configuração era desperdício puro.
+    forense_on = _forense_ativa()
 
     # 1) pré-filtro rápido (metadados) — decide o que se analisa vs ignora
     candidatos, ignorados = [], []
@@ -591,7 +609,8 @@ def analisar_conteudo(referencia: str, request: Request):
             # Forense do próprio ficheiro: o modelo de visão lê o que o documento
             # MOSTRA e nunca vê que os bytes foram editados no Sejda. Corre sobre
             # o mesmo download, portanto não custa nem uma chamada a mais.
-            fsinais.extend(_forense_sinais(b64, fname, mt, doc_nome, proponente))
+            if forense_on:
+                fsinais.extend(_forense_sinais(b64, fname, mt, doc_nome, proponente))
         except Exception as e:
             return None, {"ficheiro": fname, "motivo": f"erro na análise ({type(e).__name__})"}, [], {}
         return ({"ficheiro": fname, "documento": doc_nome, "proponente": proponente,
@@ -633,12 +652,17 @@ def analisar_conteudo(referencia: str, request: Request):
             "Uma passagem final cruza os factos extraídos de todos os documentos para "
             "apanhar incoerências entre eles (ex.: IHT nos recibos que não consta no "
             "total anual do IRS) — sinais marcados como 'cruzamento entre documentos'. "
-            "Cada ficheiro passa ainda por uma análise FORENSE dos seus bytes "
-            "(metadados PDF/XMP, guardas incrementais, anotações sobrepostas, EXIF), "
-            "que deteta edição por ferramentas como o Sejda ou o Photoshop mesmo "
-            "quando o documento se lê impecavelmente. Esses sinais indicam edição, "
-            "não falsificação: perante um, pede-se o original ao emitente."
+            + ("Cada ficheiro passa ainda por uma análise FORENSE dos seus bytes "
+               "(metadados PDF/XMP, guardas incrementais, anotações sobrepostas, EXIF), "
+               "que deteta edição por ferramentas como o Sejda ou o Photoshop mesmo "
+               "quando o documento se lê impecavelmente. Esses sinais indicam edição, "
+               "não falsificação: perante um, pede-se o original ao emitente."
+               if forense_on else
+               "A validação de documentos alterados (integridade do ficheiro) está "
+               "DESLIGADA nas Configurações → Loja, por isso não foram procurados "
+               "vestígios de edição nos ficheiros.")
         ),
+        "forense_ativa": forense_on,
         "fonte": FONTE,
         "as_of": datetime.now(timezone.utc).date().isoformat(),
     }
