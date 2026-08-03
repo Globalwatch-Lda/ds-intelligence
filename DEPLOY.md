@@ -458,3 +458,50 @@ cd ~/ds-engine/backend && venv/bin/python scripts/verificar_pdf.py /caminho/reci
 ⚠️ Estes sinais indicam **edição**, não falsificação: um extrato pode ter passado
 por uma ferramenta online só para juntar páginas. O que mudam é o ónus — perante
 um recibo saído de um editor de PDF, pede-se o original ao emitente.
+
+---
+
+## 14. Montar uma loja nova (Ago 2026)
+
+Ramada e Loulé foram montadas à mão e ficaram diferentes uma da outra — as
+credenciais do CRM estão no `.env` numa e cifradas em `platform_users` na outra,
+o que já custou uma tarde de diagnóstico. A partir daqui monta-se por script.
+
+```bash
+sudo python3 scripts/nova_loja.py --dry-run     # mostra o plano
+sudo python3 scripts/nova_loja.py               # pergunta e executa
+```
+
+Pede número da loja (agencyId), nome, subdomínio e as credenciais CrediDesk, e
+faz: schema + migrações, checkout, venv, `.env` (com `APP_SESSION_SECRET` e
+`APP_CRYPTO_KEY` **próprios** — nunca partilhados entre lojas), seed da loja e do
+utilizador inicial, serviços systemd, site nginx, cron desfasado e a primeira
+sincronização. Fica por fazer, porque não se pode automatizar daqui: **registo
+DNS** e **certbot**.
+
+`scripts/apply_migrations.py` aplica TODAS as migrações a um schema à escolha
+(`--schema dsf`), regista as aplicadas em `<schema>.schema_migrations` e é
+idempotente — serve também para pôr uma loja existente em dia.
+
+### ⚠️ `pgrst.db_schemas` — a armadilha que derrubou as duas lojas
+
+A migração 008 tem `alter role authenticator set pgrst.db_schemas = '…, ds'`.
+Essa instrução **SUBSTITUI** a lista de schemas expostos ao PostgREST. Ao correr
+as migrações num schema de ensaio (3 Ago 2026), a lista passou a
+`public, graphql_public, dsteste` — `ds` e `dsl` saíram, a API deixou de ver as
+tabelas e **o login parou nas duas lojas** (503 "Login não configurado", porque a
+leitura de `platform_users` falhava). Reposto com:
+
+```sql
+alter role authenticator set pgrst.db_schemas = 'public, graphql_public, ds, dsl';
+notify pgrst, 'reload config';
+```
+
+O `apply_migrations.py` passou a **saltar** essa instrução. Para expor um schema
+novo usa-se `--expor`, que lê a lista actual e **acrescenta** — nunca substitui.
+Confirmar sempre depois:
+
+```sql
+select setconfig from pg_db_role_setting s join pg_roles r on r.oid = s.setrole
+ where r.rolname = 'authenticator';
+```
