@@ -230,8 +230,13 @@ def main() -> None:
     crm_email = perguntar("Email da conta CrediDesk da loja", args.crm_email, lambda v: "@" in v)
     crm_password = perguntar("Password dessa conta", args.crm_password, segredo=True)
 
-    slug = dominio.split(".")[0]
-    schema = args.schema or ("ds" + re.sub(r"[^a-z0-9]", "", slug)[2:])[:20] or f"ds{numero}"
+    # Convenção da frota, a partir do subdomínio (dsfaro.synertia-gw.ai):
+    #   slug=faro · pasta ~/ds-engine-faro · serviços ds-faro/ds-faro-frontend · schema dsf…
+    # O "ds" do subdomínio é retirado para o nome do serviço não ficar "ds-dsfaro"
+    # — e, mais importante, para bater certo com o que o deploy.sh deriva da pasta.
+    subdominio = re.sub(r"[^a-z0-9]", "", dominio.split(".")[0])
+    slug = subdominio[2:] if subdominio.startswith("ds") and len(subdominio) > 2 else subdominio
+    schema = args.schema or f"ds{slug}"[:20]
     destino = BASE_UBUNTU / f"ds-engine-{slug}"
     porta_api, porta_front = portas_livres()
 
