@@ -32,6 +32,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # para importar dns_netlify
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -310,8 +312,23 @@ Resumo do que vai ser feito
         sh(f"systemctl enable --now ds-{slug} ds-{slug}-frontend"),
     ))
 
-    # --- 6. nginx ---------------------------------------------------------
+    # --- 6. DNS + nginx + certificado -------------------------------------
     print("\n[6/7] Site")
+    # DNS antes do nginx: o certificado só se emite depois de o nome resolver.
+    from dns_netlify import garantir_registo, token_disponivel  # noqa: E402
+
+    token_dns = token_disponivel()
+    ip_box = ""
+    try:
+        ip_box = sh("curl -s -4 --max-time 10 https://ifconfig.me || hostname -I | awk '{print $1}'")
+    except RuntimeError:
+        pass
+    if token_dns and ip_box:
+        ok, msg = garantir_registo(dominio, ip_box, token=token_dns, seco=args.dry_run)
+        print(("  ✓ DNS: " if ok else "  ✗ DNS: ") + msg)
+    else:
+        print("  ! DNS por criar — sem token Netlify (/etc/ds-matrix/netlify.token) "
+              f"ou sem IP. Criar à mão: A {dominio} -> {ip_box or '<ip da box>'}")
     p.correr(f"configurar o nginx para {dominio}", lambda: (
         Path(f"/etc/nginx/sites-available/{slug}").write_text(
             NGINX.format(dominio=dominio, porta_api=porta_api, porta_front=porta_front)),
@@ -320,6 +337,14 @@ Resumo do que vai ser feito
         sh("nginx -t"),
         sh("systemctl reload nginx"),
     ))
+    # Certificado: só se o DNS já resolver para esta box, senão o Let's Encrypt
+    # falha a validação e deixa o site em HTTP. Quando o registo acabou de ser
+    # criado, a propagação costuma ser de segundos — mas não se garante.
+    p.correr(f"certificado Let's Encrypt para {dominio}", lambda: print(
+        sh(f"certbot --nginx -n --agree-tos --redirect -d {dominio} "
+           f"--email suporte@globalwatch.pt 2>&1 | tail -3")
+        if sh(f"getent hosts {dominio} | awk '{{print $1}}' || true").strip() == ip_box
+        else f"  ! DNS ainda não resolve para {ip_box} — correr depois: certbot --nginx -d {dominio}"))
 
     # --- 7. cron ----------------------------------------------------------
     print("\n[7/7] Tarefas automáticas")
@@ -341,10 +366,12 @@ Resumo do que vai ser feito
     print(f"""
 === Instalação {'planeada' if args.dry_run else 'concluída'} ===
 
-Falta o que não se pode automatizar daqui:
-  1. DNS — registo A de {dominio} para o IP desta box (zona na NS1).
-  2. Certificado — depois do DNS propagar:  certbot --nginx -d {dominio}
-  3. Expor o schema `{schema}` em Supabase → Settings → API → Exposed schemas.
+Ainda por confirmar:
+  1. Expor o schema `{schema}` em Supabase → Settings → API → Exposed schemas
+     (ou correr:  scripts/apply_migrations.py --schema {schema} --expor)
+  2. Se o DNS ou o certificado ficaram por fazer (ver acima), tratar deles:
+       python3 scripts/dns_netlify.py --dominio {dominio} --ip <ip>
+       certbot --nginx -d {dominio}
 
 Depois entre em https://{dominio} com o utilizador inicial que o passo 4 imprimiu
 e confirme, na página de Leads, que só aparecem leads da agência {numero}.
