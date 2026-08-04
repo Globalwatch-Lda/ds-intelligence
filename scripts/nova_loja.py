@@ -118,6 +118,9 @@ def env_novo(cfg: dict, base: dict[str, str]) -> str:
         f"DB_SCHEMA={cfg['schema']}",
         f"APP_BASE_URL=https://{cfg['dominio']}",
         "",
+        "# Ligação DDL: é com ela que o deploy aplica as migrações novas a esta loja.",
+        f"DB_URL={cfg.get('db_url', '')}",
+        "",
         "# Segredos PRÓPRIOS desta instalação — nunca partilhar com outra loja.",
         f"APP_SESSION_SECRET={secrets.token_urlsafe(48)}",
         f"APP_CRYPTO_KEY={Fernet.generate_key().decode()}",
@@ -232,8 +235,13 @@ def main() -> None:
     destino = BASE_UBUNTU / f"ds-engine-{slug}"
     porta_api, porta_front = portas_livres()
 
+    raiz_repo = Path(__file__).resolve().parents[1]
+    ddl = raiz_repo / "cred" / "ddl.txt"
+    db_url = args.db_url or (ddl.read_text().strip() if ddl.exists() else "")
+
     cfg = {"numero": numero, "nome": nome, "dominio": dominio, "schema": schema,
-           "slug": slug, "dir": str(destino), "porta_api": porta_api, "porta_front": porta_front}
+           "slug": slug, "dir": str(destino), "porta_api": porta_api,
+           "porta_front": porta_front, "db_url": db_url}
 
     print(f"""
 Resumo do que vai ser feito

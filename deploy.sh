@@ -35,12 +35,33 @@ SHA="$(git rev-parse --short=7 HEAD)"
 # Estiveram fixos em ds-intelligence* até 31 jul 2026: um deploy do Loulé
 # reiniciava a PRODUÇÃO da Ramada e deixava o próprio Loulé a correr código
 # antigo (o ds-loule-frontend esteve 2 dias sem reiniciar, sem ninguém notar).
-case "$(basename "$PWD")" in
+#
+# As lojas novas seguem a convenção do instalador (scripts/nova_loja.py):
+# ~/ds-engine-<slug> → serviços ds-<slug> e ds-<slug>-frontend. Sem esta regra,
+# uma loja criada pelo instalador batia no `exit 1` e nunca mais recebia deploys.
+CHECKOUT="$(basename "$PWD")"
+case "$CHECKOUT" in
   ds-engine)         API=ds-intelligence;         WEB=ds-intelligence-frontend ;;
   ds-engine-loule)   API=ds-loule;                WEB=ds-loule-frontend ;;
   ds-engine-staging) API=ds-intelligence-staging; WEB=ds-intelligence-frontend-staging ;;
+  ds-engine-*)       API="ds-${CHECKOUT#ds-engine-}"; WEB="ds-${CHECKOUT#ds-engine-}-frontend" ;;
   *) echo "✗ checkout desconhecido ($PWD) — não sei que serviços reiniciar"; exit 1 ;;
 esac
+
+# Migrações pendentes DESTA loja. Cada instalação tem o seu schema e é aqui que
+# se põe em dia — de outro modo, uma migração nova teria de ser aplicada à mão em
+# cada loja, e a que fosse esquecida só se descobria com uma página a rebentar.
+# É idempotente (regista o que aplicou em <schema>.schema_migrations) e não
+# bloqueia o deploy: sem DB_URL configurado, avisa e segue.
+DB_URL_LOJA="$(grep -E '^DB_URL=' backend/.env 2>/dev/null | cut -d= -f2- || true)"
+DB_SCHEMA_LOJA="$(grep -E '^DB_SCHEMA=' backend/.env 2>/dev/null | cut -d= -f2- || true)"
+if [ -n "$DB_URL_LOJA" ] && [ -n "$DB_SCHEMA_LOJA" ]; then
+  echo "→ migrações pendentes (schema $DB_SCHEMA_LOJA)"
+  DB_URL="$DB_URL_LOJA" backend/venv/bin/python scripts/apply_migrations.py \
+    --schema "$DB_SCHEMA_LOJA" || echo "  ⚠ migrações falharam — ver acima; a app segue com o schema atual"
+else
+  echo "→ migrações: DB_URL/DB_SCHEMA não configurados no .env — saltado"
+fi
 
 echo "→ restart services ($API, $WEB)"
 sudo systemctl restart "$API"
