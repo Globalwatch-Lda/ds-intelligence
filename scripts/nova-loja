@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# `nova-loja` — instalar uma loja DS Matrix nesta box, sem decorar nada.
+#
+# Instalado em /usr/local/bin/nova-loja, basta escrever `nova-loja` depois do ssh.
+# Vai sempre buscar a versão mais recente do instalador ao GitHub antes de correr,
+# para nunca se montar uma loja com um instalador velho — foi por versões
+# diferentes que a Ramada e Loulé ficaram diferentes uma da outra.
+#
+#   nova-loja              instala (pergunta o que precisa)
+#   nova-loja --dry-run    mostra o plano, não toca em nada
+#
+# Reinstalar/actualizar este comando:
+#   sudo bash /opt/ds-instalador/scripts/instalar-comando.sh
+set -euo pipefail
+
+REPO="https://github.com/Globalwatch-Lda/ds-intelligence.git"
+DIR="/opt/ds-instalador"
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "→ a instalação mexe em systemd e nginx; a pedir privilégios…"
+  exec sudo -- "$0" "$@"
+fi
+
+echo "→ a obter a versão mais recente do instalador"
+if [ -d "$DIR/.git" ]; then
+  git -c safe.directory="$DIR" -C "$DIR" fetch --quiet origin main
+  git -c safe.directory="$DIR" -C "$DIR" reset --hard --quiet origin/main
+else
+  rm -rf "$DIR"
+  git clone --quiet "$REPO" "$DIR"
+fi
+echo "  instalador em $(git -c safe.directory="$DIR" -C "$DIR" log --oneline -1)"
+
+exec python3 "$DIR/scripts/nova_loja.py" "$@"
