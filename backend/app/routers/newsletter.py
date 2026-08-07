@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from ..config import settings
 from ..core.channels import CHANNELS
-from ..core.dispatcher import enqueue, enqueue_many
+from ..core.dispatcher import enqueue, enqueue_many, quota_hoje
 from ..core.mailer import branded_email
 from ..core.tokens import make_unsub_token
 from ..core.wa_client import is_demo_recipient
@@ -167,6 +167,22 @@ def newsletter_audience():
             "Com número de produção Meta, alcançam-se todos os opted-in com telefone."
         ),
     }
+
+
+@router.get("/quota")
+def newsletter_quota():
+    """Quanto falta do teto diário de cada canal SELECCIONÁVEL no ecrã (email,
+    sms). 'sms' reporta a quota do whatsapp_evolution — é para lá que sai de
+    facto (ver send_newsletter) — para o operador ver o número real antes de
+    enviar, não o do canal que está inactivo.
+
+    NOTE: declarado antes de /{newsletter_id} pela mesma razão do /audience —
+    rota estática tem de vir primeiro, senão 'quota' é lido como um uuid."""
+    sb = supabase()
+    email = quota_hoje(sb, "email")
+    sms = quota_hoje(sb, "whatsapp_evolution")
+    sms["canal"] = "sms"  # o operador escolhe 'sms' no ecrã; a quota é a real
+    return {"email": email, "sms": sms}
 
 
 @router.get("/{newsletter_id}")
@@ -377,6 +393,11 @@ def send_newsletter(body: SendBody, request: Request):
 
     total = 0
     por_canal: dict[str, int] = {}
+    # 'sms' é redirigido para 'whatsapp_evolution' (ver abaixo) — se alguém pedir os
+    # dois canais na mesma chamada (só possível por API directa, o frontend não
+    # deixa seleccionar whatsapp_evolution), evita mandar a mesma mensagem duas
+    # vezes à mesma audiência.
+    entregues_de_facto: set[str] = set()
     for canal in canais:
         if canal == "email":
             assunto = f"{nl['titulo']} — {settings.LOJA_NAME}"
@@ -401,7 +422,19 @@ def send_newsletter(body: SendBody, request: Request):
         else:  # sms / whatsapp_evolution → plain text + link
             dests = [r["e164"] for r in _opted_in_recipients(sb)]
             corpo = f"📬 {teaser}\n\nLeia na íntegra: {link}"
-            r = enqueue(canal, dests, corpo, ref_tipo="newsletter", ref_id=str(nl["id"]), criado_por=user)
+            # O canal 'sms' não tem serviço configurado (sem credenciais AWS) — o
+            # cron salta-o em silêncio (`ativo=false`) e as mensagens ficam presas
+            # em 'pendente' para sempre, sem erro nenhum. Enquanto isso não mudar,
+            # o que o operador escolhe como "SMS" sai a sério pelo WhatsApp
+            # Evolution, que já está activo — a etiqueta no ecrã mantém-se 'SMS'
+            # de propósito, para não obrigar a mexer no frontend nem confundir
+            # quem está a escolher canais. Pedido explícito, 7 ago 2026.
+            canal_real = "whatsapp_evolution" if canal == "sms" else canal
+            if canal_real in entregues_de_facto:
+                por_canal[canal] = 0
+                continue
+            entregues_de_facto.add(canal_real)
+            r = enqueue(canal_real, dests, corpo, ref_tipo="newsletter", ref_id=str(nl["id"]), criado_por=user)
         por_canal[canal] = r["enqueued"]
         total += r["enqueued"]
 

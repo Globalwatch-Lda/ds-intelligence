@@ -24,6 +24,29 @@ def _cfg(sb, canal: str) -> dict:
     return {**_DEFAULT_CFG, **(row or {})}
 
 
+def quota_hoje(sb, canal: str) -> dict:
+    """Teto diário do canal e quanto já foi ENTREGUE hoje (status='enviado',
+    contado por `enviado_em`, não por `criado_em` — o que importa para o teto é
+    quando saiu de facto, não quando foi enfileirado). Devolve sempre um
+    `restante` >= 0, mesmo que o canal esteja inactivo (nesse caso restante=0,
+    porque nada vai sair)."""
+    cfg = _cfg(sb, canal)
+    hoje = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    enviado_hoje = (
+        sb.table("envios").select("id", count="exact")
+        .eq("canal", canal).eq("status", "enviado").gte("enviado_em", hoje.isoformat())
+        .limit(1).execute().count or 0
+    )
+    cap = int(cfg["cap_diario"])
+    return {
+        "canal": canal,
+        "ativo": bool(cfg.get("ativo")),
+        "cap_diario": cap,
+        "enviado_hoje": enviado_hoje,
+        "restante": max(0, cap - enviado_hoje),
+    }
+
+
 def _user_evolution_instance(sb, username: str | None) -> str | None:
     """The sender's own WhatsApp instance (their number), for 'em nome do utilizador'.
     Falls back to the deterministic name (ds_<username>) so logins without a stored

@@ -4,6 +4,24 @@ import useSWR from 'swr';
 import Link from 'next/link';
 import { api } from '../../lib/api';
 
+// Semana ISO-8601 (segunda a domingo, semana 1 = a que contém a 1.ª quinta-feira
+// do ano) — é a numeração de semana standard em Portugal, não a "semana do
+// calendário" ingénua que conta a partir de 1 de Janeiro. Datas perto da
+// viragem do ano podem pertencer à semana 1 do ano seguinte (ex. 29 Dez) ou à
+// última semana do ano anterior — por isso o ano mostrado é o da PRÓPRIA
+// semana ISO, não necessariamente o ano da data. Verificado byte a byte contra
+// `datetime.date.isocalendar()` do Python (a implementação de referência),
+// incluindo os dois casos de viragem de ano.
+function semanaISO(dataStr: string): string {
+  const [y, m, day] = dataStr.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1, day));
+  const diaSemana = d.getUTCDay() || 7; // segunda=1 … domingo=7
+  d.setUTCDate(d.getUTCDate() + 4 - diaSemana); // quinta-feira desta semana ISO
+  const inicioAno = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const semana = Math.ceil((((d.getTime() - inicioAno.getTime()) / 86400000) + 1) / 7);
+  return `Semana ${semana}/${d.getUTCFullYear()}`;
+}
+
 type Newsletter = {
   id: string;
   titulo: string;
@@ -66,6 +84,12 @@ export default function NewsletterPage() {
   const { data: list, mutate } = useSWR<{ newsletters: Newsletter[] }>('/api/newsletter/list', api);
   const { data: me } = useSWR<{ can_newsletter?: boolean }>('/api/auth/me', api);
   const canGenerate = !!me?.can_newsletter;
+  // Quota diária por canal — refresca a cada 20s enquanto a página de compor
+  // está aberta, para o número não ficar preso no que era verdade ao carregar.
+  type Quota = { canal: string; ativo: boolean; cap_diario: number; enviado_hoje: number; restante: number };
+  const { data: quota, mutate: mutateQuota } = useSWR<{ email: Quota; sms: Quota }>(
+    canGenerate ? '/api/newsletter/quota' : null, api, { refreshInterval: 20000 },
+  );
 
   // Read-only viewers: surface the latest SENT newsletter, rendered in full.
   const enviadas = (list?.newsletters || []).filter((n) => n.enviado_em);
@@ -145,6 +169,7 @@ export default function NewsletterPage() {
       const detalhe = Object.entries(r.por_canal || {}).map(([c, n]) => `${c}: ${n}`).join(', ');
       setSendStatus(`✓ ${r.enqueued} envio(s) em fila (${detalhe}). A entrega é faseada conforme os limites de cada canal.`);
       mutate();
+      mutateQuota();
     } catch (e: any) {
       setSendStatus(`Erro: ${e.message}`);
     }
@@ -214,6 +239,23 @@ export default function NewsletterPage() {
               <button className="btn-primary" onClick={send}>Enviar</button>
             </div>
           </div>
+          {quota && (
+            <p className="text-ink-400 text-xs mb-4 -mt-2 flex flex-wrap gap-x-4 gap-y-1">
+              {(['email', 'sms'] as const)
+                .filter((c) => canais.includes(c))
+                .map((c) => {
+                  const q = quota[c];
+                  const esgotado = q.ativo && q.restante === 0;
+                  return (
+                    <span key={c} className={esgotado ? 'text-amber-700 font-medium' : ''}>
+                      {c === 'email' ? 'Email' : 'SMS'}:{' '}
+                      {q.ativo ? `${q.restante} de ${q.cap_diario} ainda hoje` : 'canal inactivo'}
+                      {esgotado ? ' — teto atingido, o resto fica em fila para amanhã' : ''}
+                    </span>
+                  );
+                })}
+            </p>
+          )}
           <div className="grid md:grid-cols-2 gap-4">
             <textarea
               value={edited || draft.conteudo_md || ''}
@@ -233,7 +275,8 @@ export default function NewsletterPage() {
           {latest ? (
             <>
               <p className="text-ink-400 text-sm mb-4">
-                Enviada {latest.enviado_em ? new Date(latest.enviado_em).toLocaleDateString('pt-PT') : ''} · {latest.destinatarios_count} destinatário(s)
+                Enviada {latest.enviado_em ? new Date(latest.enviado_em).toLocaleDateString('pt-PT') : ''}
+                {latest.enviado_em ? ` (${semanaISO(latest.enviado_em)})` : ''} · {latest.destinatarios_count} destinatário(s)
                 {' · '}
                 <Link href={`/newsletter/${latest.id}`} className="text-ds-700 hover:underline">abrir página</Link>
               </p>
@@ -266,7 +309,8 @@ export default function NewsletterPage() {
                 >
                   <span className="text-ds-700 underline-offset-2 hover:underline">{n.titulo}</span>
                   <span className="text-ink-400 text-xs whitespace-nowrap">
-                    Enviada {n.enviado_em ? new Date(n.enviado_em).toLocaleDateString('pt-PT') : ''} · {n.destinatarios_count} dest.
+                    Enviada {n.enviado_em ? new Date(n.enviado_em).toLocaleDateString('pt-PT') : ''}
+                    {n.enviado_em ? ` (${semanaISO(n.enviado_em)})` : ''} · {n.destinatarios_count} dest.
                   </span>
                 </Link>
               </li>
