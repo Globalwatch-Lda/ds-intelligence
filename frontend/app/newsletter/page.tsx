@@ -186,6 +186,22 @@ export default function NewsletterPage() {
         </p>
       </div>
 
+      {canGenerate && quota && (
+        <p className="text-ink-400 text-xs flex flex-wrap gap-x-4 gap-y-1">
+          {(['email', 'sms'] as const).map((c) => {
+            const q = quota[c];
+            const esgotado = q.ativo && q.restante === 0;
+            return (
+              <span key={c} className={esgotado ? 'text-amber-700 font-medium' : ''}>
+                {c === 'email' ? 'Email' : 'SMS'}:{' '}
+                {q.ativo ? `${q.restante} de ${q.cap_diario} ainda hoje` : 'canal inactivo'}
+                {esgotado ? ' — teto atingido, o resto fica em fila para amanhã' : ''}
+              </span>
+            );
+          })}
+        </p>
+      )}
+
       {canGenerate && (
         <div className="card space-y-4">
           <label className="block text-sm font-medium text-ink-700">Tema</label>
@@ -239,23 +255,6 @@ export default function NewsletterPage() {
               <button className="btn-primary" onClick={send}>Enviar</button>
             </div>
           </div>
-          {quota && (
-            <p className="text-ink-400 text-xs mb-4 -mt-2 flex flex-wrap gap-x-4 gap-y-1">
-              {(['email', 'sms'] as const)
-                .filter((c) => canais.includes(c))
-                .map((c) => {
-                  const q = quota[c];
-                  const esgotado = q.ativo && q.restante === 0;
-                  return (
-                    <span key={c} className={esgotado ? 'text-amber-700 font-medium' : ''}>
-                      {c === 'email' ? 'Email' : 'SMS'}:{' '}
-                      {q.ativo ? `${q.restante} de ${q.cap_diario} ainda hoje` : 'canal inactivo'}
-                      {esgotado ? ' — teto atingido, o resto fica em fila para amanhã' : ''}
-                    </span>
-                  );
-                })}
-            </p>
-          )}
           <div className="grid md:grid-cols-2 gap-4">
             <textarea
               value={edited || draft.conteudo_md || ''}
