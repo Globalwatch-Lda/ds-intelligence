@@ -79,6 +79,7 @@ export default function NewsletterPage() {
   const [draft, setDraft] = useState<Newsletter | null>(null);
   const [sendStatus, setSendStatus] = useState<string | null>(null);
   const [canais, setCanais] = useState<string[]>(['email']);
+  const [semanaFiltro, setSemanaFiltro] = useState(''); // '' = todas as semanas
 
   function toggleCanal(c: string) {
     setCanais((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
@@ -97,6 +98,15 @@ export default function NewsletterPage() {
   // Read-only viewers: surface the latest SENT newsletter, rendered in full.
   const enviadas = (list?.newsletters || []).filter((n) => n.enviado_em);
   const latest = enviadas[0];
+  // Semanas com pelo menos uma newsletter enviada, mais recente primeiro (a ordem
+  // de `enviadas` já vem assim de `/api/newsletter/list`) — para o filtro só
+  // mostrar semanas que existem, nunca uma lista vazia depois de escolhida.
+  const semanasDisponiveis = Array.from(
+    new Set(enviadas.map((n) => semanaISO(n.enviado_em!))),
+  );
+  const enviadasFiltradas = semanaFiltro
+    ? enviadas.filter((n) => semanaISO(n.enviado_em!) === semanaFiltro)
+    : enviadas;
   const { data: latestFull } = useSWR<Newsletter>(
     me && !canGenerate && latest ? `/api/newsletter/${latest.id}` : null,
     api,
@@ -298,12 +308,31 @@ export default function NewsletterPage() {
       )}
 
       <div className="card">
-        <h3 className="text-base font-semibold text-ink-900 mb-3">Newsletters enviadas</h3>
+        <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+          <h3 className="text-base font-semibold text-ink-900">Newsletters enviadas</h3>
+          {semanasDisponiveis.length > 1 && (
+            <label className="text-xs text-ink-400 flex items-center gap-2">
+              Semana
+              <select
+                value={semanaFiltro}
+                onChange={(e) => setSemanaFiltro(e.target.value)}
+                className="rounded-lg border border-ink-100 px-2 py-1 text-xs text-ink-700"
+              >
+                <option value="">Todas</option>
+                {semanasDisponiveis.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
         {enviadas.length === 0 ? (
           <p className="text-ink-400 text-sm">Ainda não foi enviada nenhuma newsletter.</p>
+        ) : enviadasFiltradas.length === 0 ? (
+          <p className="text-ink-400 text-sm">Nenhuma newsletter enviada nessa semana.</p>
         ) : (
           <ul className="text-sm divide-y divide-ink-100">
-            {enviadas.map((n) => (
+            {enviadasFiltradas.map((n) => (
               <li key={n.id}>
                 <Link
                   href={`/newsletter/${n.id}`}
