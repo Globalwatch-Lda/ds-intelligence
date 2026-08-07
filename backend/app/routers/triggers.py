@@ -17,9 +17,11 @@ from pydantic import BaseModel
 
 from ..config import settings
 from ..core.scope import user_scope, apply_scope
-from ..core.wa_client import send_text, is_demo_recipient
 from ..core.valores import valor_financiamento
 from ..db import supabase
+from ..multicanal_ctx import build_ctx  # noqa: E402 (também põe synertia_multicanal no sys.path)
+from .auth import COOKIE_NAME, token_user
+from synertia_multicanal.dispatcher import enqueue, send_pending_now  # noqa: E402
 
 router = APIRouter()
 
@@ -544,9 +546,23 @@ def _load_recipient(sb, body: FireBody) -> dict:
     }
 
 
-def _first_demo_recipient() -> str | None:
-    rs = [r.strip() for r in (settings.DEMO_RECIPIENTS or "").split(",") if r.strip()]
-    return rs[0] if rs else None
+def _normalizar_pt(bruto: str | None) -> str | None:
+    """Telemóvel português no formato que o Evolution espera (dígitos + indicativo,
+    sem '+', ex. '351919293434') — ou None se não for um.
+
+    O `clientes_real.telephone` chega em formatos variados ("+351 911 144 525",
+    "914299749" sem indicativo). Ao contrário do Meta (que exigia números
+    pré-verificados em modo demo), o Evolution envia para qualquer número real
+    assim que a sessão do consultor está ligada — por isso a normalização é o
+    único passo que falta antes do envio, não há mais nenhuma restrição."""
+    if not bruto:
+        return None
+    n = "".join(c for c in bruto if c.isdigit())
+    if n.startswith("351") and len(n) == 12:
+        return n
+    if len(n) == 9 and n[0] == "9":
+        return f"351{n}"
+    return None
 
 
 def _load_context(sb, body: FireBody, cli: dict) -> dict:
@@ -585,36 +601,41 @@ def preview_trigger(body: FireBody):
     ctx = _load_context(sb, body, cli)
     msg = _template(body.trigger, ctx)
     cliente_phone = cli.get("telefone") or ""
-    demo_phone = _first_demo_recipient()
+    to = _normalizar_pt(cliente_phone)
     return {
         "preview": msg,
         "cliente_nome": cli["nome"],
         "cliente_telefone": cliente_phone,
-        "demo_redirect_to": demo_phone if not is_demo_recipient(cliente_phone) else None,
+        "numero_invalido": to is None,
         "data_source": cli["source"],
     }
 
 
 @router.post("/fire")
-async def fire_trigger(body: FireBody):
+def fire_trigger(body: FireBody, request: Request):
     sb = supabase()
     cli = _load_recipient(sb, body)
     ctx = _load_context(sb, body, cli)
     msg = body.mensagem_override.strip() if body.mensagem_override else _template(body.trigger, ctx)
 
     cliente_phone = cli.get("telefone") or ""
-    demo_redirected = False
-    if body.telefone_override and is_demo_recipient(body.telefone_override):
-        to = body.telefone_override
-    elif is_demo_recipient(cliente_phone):
-        to = cliente_phone
-    else:
-        to = _first_demo_recipient() or ""
-        demo_redirected = bool(to)
+    to = _normalizar_pt(body.telefone_override) if body.telefone_override else _normalizar_pt(cliente_phone)
 
-    is_real_send = bool(to) and is_demo_recipient(to)
-    wa_resp = await send_text(to, msg) if is_real_send else {"stub": True, "to": to, "body": msg}
-    meta_id = (wa_resp.get("messages") or [{}])[0].get("id") if isinstance(wa_resp, dict) else None
+    # Enfileira + entrega já (sem esperar pelo tique do worker) pelo canal genérico
+    # (messaging_config decide Evolution/Meta — hoje é Evolution). Nunca levanta:
+    # canal inactivo, teto diário atingido, ou número inválido devolvem delivered=False
+    # com o motivo em `erro`, e o pedido fica registado na mesma para o gestor rever.
+    mcx = build_ctx()
+    username = token_user(request.cookies.get(COOKIE_NAME))
+    resultado = {"delivered": False, "error": "número inválido"}
+    envio_id = None
+    if to:
+        fila = enqueue(mcx, "whatsapp_evolution", [to], msg, ref_tipo="trigger",
+                        ref_id=body.trigger, criado_por=username)
+        envio_id = (fila.get("ids") or [None])[0]
+        if envio_id:
+            resultado = send_pending_now(mcx, envio_id)
+    is_real_send = bool(resultado.get("delivered"))
 
     # uuid cliente_id only for mock + non-lead path; live triggers use cliente_crm_id
     trigger_cliente_id = cli.get("cliente_uuid") if cli["source"] == "mock" and not cli.get("is_lead") else None
@@ -635,9 +656,8 @@ async def fire_trigger(body: FireBody):
         "processo_crm_id": processo_crm_id,
         "apolice_id": body.apolice_id if cli["source"] == "mock" else None,
         "trigger_type": body.trigger,
-        "canal": "whatsapp",
+        "canal": "whatsapp_evolution",
         "mensagem": msg,
-        "meta_wa_message_id": meta_id,
         "status": "enviado" if is_real_send else "agendado",
     }).execute().data[0]
 
@@ -646,9 +666,8 @@ async def fire_trigger(body: FireBody):
             "cliente_id": trigger_cliente_id,
             "cliente_crm_id": trigger_cliente_crm_id,
             "to_e164": to,
-            "canal": "whatsapp",
+            "canal": "whatsapp_evolution",
             "corpo": msg,
-            "meta_wa_message_id": meta_id,
             "trigger_id": fired["id"],
             "status": "sent" if is_real_send else "stubbed",
         }).execute()
@@ -660,8 +679,8 @@ async def fire_trigger(body: FireBody):
         "to": to,
         "cliente_nome": cli["nome"],
         "cliente_telefone": cliente_phone,
-        "demo_redirected": demo_redirected,
         "data_source": cli["source"],
-        "wa_response": wa_resp,
+        "wa_response": resultado,
         "fired_id": fired["id"],
+        "envio_id": envio_id,
     }
