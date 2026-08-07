@@ -13,8 +13,11 @@ import { api } from '../../lib/api';
 // `datetime.date.isocalendar()` do Python (a implementação de referência),
 // incluindo os dois casos de viragem de ano.
 function semanaISO(dataStr: string): string {
-  const [y, m, day] = dataStr.split('-').map(Number);
-  const d = new Date(Date.UTC(y, m - 1, day));
+  // `enviado_em` vem da BD como timestamptz ("2026-08-07T00:00:00+00:00"), não
+  // como "YYYY-MM-DD" — dar isto ao Date() directamente em vez de fazer split('-'),
+  // que parte a string ao meio no "T00:00:00+00:00" e dá NaN/NaN.
+  const d0 = new Date(dataStr);
+  const d = new Date(Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), d0.getUTCDate()));
   const diaSemana = d.getUTCDay() || 7; // segunda=1 … domingo=7
   d.setUTCDate(d.getUTCDate() + 4 - diaSemana); // quinta-feira desta semana ISO
   const inicioAno = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
