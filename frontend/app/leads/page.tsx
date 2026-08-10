@@ -203,13 +203,23 @@ function LeadsConteudo() {
       <div className="card">
         <h3 className="text-base font-semibold text-ink-900 mb-3">
           Todas as leads{' '}
-          <span className="chip ml-2">
-            {temFiltros ? `${ordenadas.length} de ${leads.length}` : leads.length}
-          </span>
+          <button
+            type="button"
+            onClick={() => setFiltros({ ...filtros, soNovas: false })}
+            className={`chip ml-2 ${!filtros.soNovas ? 'ring-1 ring-ink-300' : ''}`}
+            title="Mostrar todas as leads"
+          >
+            {leads.length}
+          </button>
           {novas.length > 0 && (
-            <span className="chip chip-alert ml-2" title="Sem contacto registado no CRM">
+            <button
+              type="button"
+              onClick={() => setFiltros({ ...filtros, soNovas: true })}
+              className={`chip chip-alert ml-2 ${filtros.soNovas ? 'ring-1 ring-ds-600' : ''}`}
+              title="Mostrar só as novas — sem contacto registado no CRM"
+            >
               {novas.length} novas
-            </span>
+            </button>
           )}
         </h3>
 
@@ -235,11 +245,6 @@ function LeadsConteudo() {
             <option value="">Todos os estados</option>
             {opcoes('status').map((v) => <option key={v} value={v}>{v}</option>)}
           </select>
-          <label className="flex items-center gap-2 rounded-lg border border-ink-100 px-3 py-1.5 text-ink-700">
-            <input type="checkbox" checked={filtros.soNovas}
-                   onChange={(e) => setFiltros({ ...filtros, soNovas: e.target.checked })} />
-            só novas
-          </label>
           <label className="flex items-center gap-1 text-ink-400">
             criadas de
             <input type="date" value={filtros.de} onChange={(e) => setFiltros({ ...filtros, de: e.target.value })}
