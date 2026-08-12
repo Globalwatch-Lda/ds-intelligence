@@ -1,5 +1,8 @@
 import { headers } from 'next/headers';
-import { LOJA_NAME, LOJA_NAME_FULL } from '../../../lib/loja';
+import { redirect } from 'next/navigation';
+import { LOJA_NAME_FULL } from '../../../lib/loja';
+
+const FALLBACK_URL = 'https://www.dsicredito.pt/pt/odivelas-jardim-da-amoreira';
 
 export const dynamic = 'force-dynamic';
 
@@ -52,12 +55,7 @@ export default async function NewsletterDetail({ params }: { params: Promise<{ i
   const nl = await getNewsletter(id);
 
   if (!nl) {
-    return (
-      <article className="max-w-2xl mx-auto py-12 px-4 text-center">
-        <h1 className="text-xl font-semibold text-ink-900">Newsletter não encontrada</h1>
-        <p className="text-ink-400 mt-2">Verifique o link ou contacte a equipa {LOJA_NAME}.</p>
-      </article>
-    );
+    redirect(FALLBACK_URL);
   }
 
   return (
