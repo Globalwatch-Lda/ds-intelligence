@@ -20,7 +20,7 @@ export function middleware(req: NextRequest) {
   }
 
   // Public pages reachable when logged out (links opened from email).
-  if (pathname === '/reset' || pathname === '/unsubscribe') {
+  if (pathname === '/reset' || pathname === '/unsubscribe' || pathname.startsWith('/newsletter/')) {
     return NextResponse.next();
   }
 
