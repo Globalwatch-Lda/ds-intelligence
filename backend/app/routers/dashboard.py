@@ -242,7 +242,7 @@ def dashboard_kpis(request: Request):
                 "label": "Taxa fixa/mista a terminar (90 dias)",
                 "value": len(taxa_fixa_90d),
                 "intent": "comercial",
-                "data_source": "live_best_effort",
+                "data_source": "live_approx",
                 "note": (
                     "Extraído de texto livre do CRM (preferência do cliente, não campo "
                     "estruturado) — usa o limite menor do intervalo de anos indicado; "
