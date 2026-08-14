@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
 
-from ..config import settings
+from ..config import settings, loja_nome
 from ..core.documentos_credito import documentos_para
 from ..core.mailer import branded_email
 from ..core.names import fix_name
@@ -145,14 +145,6 @@ def _lead_no_ambito(sb, request: Request, crm_id: int) -> dict:
     return row
 
 
-def _loja_nome(sb) -> str:
-    try:
-        row = (sb.table("loja_config").select("nome").limit(1).execute().data or [None])[0]
-    except Exception:
-        row = None
-    return (row or {}).get("nome") or settings.LOJA_NAME
-
-
 def _intro_personalizada(sb) -> str | None:
     """Texto de abertura editável em ds.msg_templates (categoria `boas_vindas_email`).
     Sem linha activa, usa-se o texto por omissão desta função — assim a loja pode
@@ -173,7 +165,7 @@ def _preparar_boas_vindas(sb, lead: dict) -> dict:
     nome = (lead.get("name") or "").strip() or "Cliente"
     primeiro = nome.split()[0]
     consultor = fix_name(lead.get("manager_name")) or None
-    loja = _loja_nome(sb)
+    loja = loja_nome()
     produto, documentos = documentos_para(lead.get("type_full_name"), lead.get("type_name"))
 
     intro = _intro_personalizada(sb) or (

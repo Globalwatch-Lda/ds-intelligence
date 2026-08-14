@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Request
 
-from ..config import settings
+from ..config import settings, loja_nome
 from ..core.scope import user_scope, apply_scope, scope_label
 from ..db import supabase
 
@@ -195,7 +195,7 @@ def dashboard_kpis(request: Request):
     processos_ganhos = sum(1 for p in processos if p.get("state_name") in GANHO_STATE_NAMES)
 
     return {
-        "loja": settings.LOJA_NAME,
+        "loja": loja_nome(),
         "as_of": today.isoformat(),
         "cards": [
             {

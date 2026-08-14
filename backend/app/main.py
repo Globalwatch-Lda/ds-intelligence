@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .config import settings
+from .config import settings, loja_nome
 from .routers import dashboard, triggers, newsletter, chat, whatsapp, leads, lead_notas, broadcasts, crm_live, recap, analise_documental, auth, perfis, equipas, public, settings as settings_router
 from .routers.auth import COOKIE_NAME, valid_token
 from .multicanal_ctx import build_ctx
@@ -68,7 +68,7 @@ def root():
         "service": "ds-intelligence-api",
         "env": settings.ENVIRONMENT,
         "version": "0.1.0",
-        "loja": settings.LOJA_NAME,
+        "loja": loja_nome(),
     }
 
 

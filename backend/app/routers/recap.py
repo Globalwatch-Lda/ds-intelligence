@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Request
 
-from ..config import settings
+from ..config import settings, loja_nome
 from ..core.scope import user_scope, apply_scope
 from ..core.valores import valor_financiamento
 from ..db import supabase
@@ -173,7 +173,7 @@ def weekly_recap(
     money_lost = sum(valor_financiamento(p) for p in closed_lost)
 
     return {
-        "loja": settings.LOJA_NAME,
+        "loja": loja_nome(),
         "week_start": monday.isoformat(),
         "week_end": friday.isoformat(),
         "as_of": today.isoformat(),

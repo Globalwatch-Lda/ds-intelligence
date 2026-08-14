@@ -18,7 +18,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from ..config import settings
+from ..config import settings, loja_nome
 from ..core.scope import user_scope, apply_scope
 from ..core.valores import valor_financiamento
 from ..db import supabase
@@ -178,7 +178,7 @@ def _manager_by_customer(sb) -> dict[int, str]:
 # ----------------------------------------------------------------- templates
 def _template(trigger: TriggerType, ctx: dict) -> str:
     nome = (ctx.get("nome") or "").split(" ")[0] or "amigo(a)"
-    loja = settings.LOJA_NAME
+    loja = loja_nome()
 
     if trigger == "aniversario":
         return (

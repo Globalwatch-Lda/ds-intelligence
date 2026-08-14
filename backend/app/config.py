@@ -83,3 +83,33 @@ class Settings:
 
 
 settings = Settings()
+
+
+def loja_nome() -> str:
+    """Nome da loja para templates/mensagens ({loja}, {{nome_loja}}, etc.).
+
+    Fonte única = loja_config.nome, editável em Configurações → Loja — só cai
+    no LOJA_NAME do .env se a BD ainda não tiver nada guardado ou estiver
+    inacessível. Antes desta função havia duas fontes independentes (o .env
+    e a BD) que podiam divergir silenciosamente — ver worklog 14 ago 2026.
+    Import de .db feito aqui dentro (não no topo do módulo) para evitar
+    import circular: db.py já importa `settings` deste ficheiro.
+    """
+    try:
+        from .db import supabase
+        row = (
+            supabase().table("loja_config").select("nome").eq("id", 1).limit(1).execute().data
+            or [None]
+        )[0]
+        nome = (row or {}).get("nome")
+        if nome:
+            return nome
+    except Exception:
+        pass
+    return settings.LOJA_NAME
+
+
+def loja_nome_curto() -> str:
+    """Forma curta (sem sufixo de localização) — mesmo separador " – " que
+    LOJA_SHORT_NAME já usava, aplicado ao valor resolvido por loja_nome()."""
+    return loja_nome().split(" – ")[0]

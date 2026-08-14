@@ -19,7 +19,7 @@ import anthropic
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from ..config import settings
+from ..config import settings, loja_nome
 from ..core.scope import user_scope, apply_scope
 from ..core.valores import valor_financiamento
 from ..db import supabase
@@ -91,7 +91,7 @@ RULES:
   that over reaching into the demo apolices/leads.
 - When the operator asks "envia uma mensagem", DO NOT pretend to send. Tell them to
   use the Gatilhos panel.
-- Keep replies under 200 words unless explicitly asked for more detail.""".replace("__LOJA__", settings.LOJA_NAME)
+- Keep replies under 200 words unless explicitly asked for more detail.""".replace("__LOJA__", loja_nome())
 
 
 def _select_all(sb, table: str, columns: str, page_size: int = 1000, *, scope: dict | None = None) -> list[dict]:
@@ -266,7 +266,7 @@ def _crm_snapshot(scope: dict | None = None) -> dict:
 
     return {
         "as_of": today.isoformat(),
-        "loja": settings.LOJA_NAME,
+        "loja": loja_nome(),
         "agregados": agregados,
         "consultores": consultores,
         "clientes": clientes_trim,

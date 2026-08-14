@@ -15,7 +15,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from pydantic import BaseModel
 
-from ..config import settings
+from ..config import settings, loja_nome
 from ..multicanal_ctx import build_ctx
 from synertia_multicanal.dispatcher import enqueue_many, send_pending_now
 from ..core.evolution import instance_name_for
@@ -99,7 +99,7 @@ def _render(template: str, nome_consultor: str, nome_cliente: str) -> str:
     return (template
             .replace("{{nome_consultor}}", nome_consultor or "")
             .replace("{{nome_cliente}}", nome_cliente or "")
-            .replace("{{nome_loja}}", settings.LOJA_NAME))
+            .replace("{{nome_loja}}", loja_nome()))
 
 
 # --------------------------------------------------------- contacts CRUD

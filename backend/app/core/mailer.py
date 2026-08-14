@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 
-from ..config import settings
+from ..config import settings, loja_nome
 
 log = logging.getLogger("ds.mailer")
 
@@ -88,7 +88,7 @@ def branded_email(
           </table>
         </td></tr>
         <tr><td style="padding:16px 28px;border-top:1px solid #ececee;font-size:12px;color:#8e8e93;">
-          {settings.LOJA_NAME}{unsub}
+          {loja_nome()}{unsub}
         </td></tr>
       </table>
     </td></tr>

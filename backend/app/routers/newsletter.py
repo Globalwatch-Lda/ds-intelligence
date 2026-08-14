@@ -19,7 +19,7 @@ import anthropic
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
 
-from ..config import settings
+from ..config import settings, loja_nome, loja_nome_curto
 from ..core.channels import CHANNELS
 from ..core.dispatcher import enqueue, enqueue_many, quota_hoje
 from ..core.mailer import branded_email
@@ -76,7 +76,7 @@ OUTPUT RULES (non-negotiable):
 - Do NOT fabricate statistics, regulatory changes, or news events. Stay evergreen unless the
   user gives you a specific datapoint.
 
-You will receive a `tema` (theme) from the user. Produce the newsletter and nothing else.""".replace("__LOJA__", settings.LOJA_SHORT_NAME)
+You will receive a `tema` (theme) from the user. Produce the newsletter and nothing else.""".replace("__LOJA__", loja_nome_curto())
 
 
 class GenerateBody(BaseModel):
@@ -205,7 +205,7 @@ content into the DS newsletter house style — same constraints as a fresh newsl
 - PRESERVE the operator's intended message, key facts, and named numbers. Do NOT add new factual claims.
 - If the source is too short to fill one page, keep it short rather than padding.
 
-Output the markdown and nothing else.""".replace("__LOJA__", settings.LOJA_NAME)
+Output the markdown and nothing else.""".replace("__LOJA__", loja_nome())
 
 
 class ReformatBody(BaseModel):
@@ -400,7 +400,7 @@ def send_newsletter(body: SendBody, request: Request):
     entregues_de_facto: set[str] = set()
     for canal in canais:
         if canal == "email":
-            assunto = f"{nl['titulo']} — {settings.LOJA_NAME}"
+            assunto = f"{nl['titulo']} — {loja_nome()}"
             # Personalise each email with the client's own unsubscribe link.
             itens = [
                 {
