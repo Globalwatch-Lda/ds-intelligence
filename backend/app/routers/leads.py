@@ -110,7 +110,11 @@ def list_leads(request: Request, limit: int = 1000):
     )
     # Só leads em aberto (Pendente) — as convertidas/perdidas não são pipeline.
     abertas = [r for r in rows if r.get("state_name") not in CLOSED_STATES]
-    return {"leads": [_shape(r, _boas_vindas_enviadas(sb)) for r in abertas]}
+    # _boas_vindas_enviadas fora do comprehension: era chamada UMA VEZ POR LEAD
+    # (N+1 queries a lead_emails) em vez de uma vez só — a própria função já
+    # avisava contra isto no docstring.
+    boas_vindas = _boas_vindas_enviadas(sb)
+    return {"leads": [_shape(r, boas_vindas) for r in abertas]}
 
 
 # ---- Email de boas-vindas -------------------------------------------------
