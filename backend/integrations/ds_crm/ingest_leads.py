@@ -144,7 +144,10 @@ def main():
             print(f"[ingest] --- conta {acct.username} ({acct.crm_email}) ---")
             client = CredidekClient(email=acct.crm_email, password=acct.crm_password)
             clients[acct.username] = client
-            for row in client.iter_leads(page_size=50, state_id=0):
+            # state_id=1 = "Pendente" — só leads por trabalhar. Concluído (2) e
+            # Perdido (3) deixam de ser puxados; as que já estavam na BD desses
+            # dois estados foram removidas nesta mudança (pedido do utilizador).
+            for row in client.iter_leads(page_size=50, state_id=1):
                 total_fetched += 1
                 norm = normalise(row)
                 cid = norm["crm_id"]
