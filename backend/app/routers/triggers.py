@@ -4,9 +4,12 @@ plus a `fire` endpoint that composes and sends the WhatsApp message.
 Templates live here (PT-PT, short, brand-consistent). The gestor sees the
 preview in the UI and can either Send or Skip per row.
 
-Data sources (28 May 2026):
-  aniversario, escritura_3m/6m/12m, doc_atraso → LIVE (clientes_real, processos_real)
-  apolice_60d, taxa_fixa_90d, lead_dormente   → MOCK (endpoints not yet captured)
+Data sources (updated 14 ago 2026):
+  aniversario, escritura_3m/6m/12m, taxa_fixa_90d, doc_atraso, lead_dormente
+    → LIVE (clientes_real, processos_real)
+  apolice_60d → MOCK (endpoint apólices ainda por capturar)
+  taxa_fixa_90d é best-effort: extraído de texto livre do CRM, não campo
+  estruturado — ver backend/integrations/ds_crm/taxa_fixa.py.
 """
 from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
@@ -31,7 +34,7 @@ TriggerType = Literal[
     "apolice_60d", "taxa_fixa_90d", "doc_atraso", "lead_dormente",
 ]
 
-LIVE_TRIGGERS = {"aniversario", "escritura_3m", "escritura_6m", "escritura_12m", "doc_atraso", "lead_dormente"}
+LIVE_TRIGGERS = {"aniversario", "escritura_3m", "escritura_6m", "escritura_12m", "taxa_fixa_90d", "doc_atraso", "lead_dormente"}
 GANHO_STATE_NAMES = ("Ganho",)
 OPEN_STATE_IDS_EXCLUDE = (12, 13)  # 12=Ganho, 13=Anulado
 ESCRITURA_TOLERANCE_DAYS = 7
@@ -366,28 +369,52 @@ def list_trigger_rows(
         return {"trigger": trigger, "rows": sorted(out, key=lambda r: r["data_vencimento"])}
 
     if trigger == "taxa_fixa_90d":
+        # Best-effort: taxa_tipo/taxa_fixa_anos_min vêm de texto livre do CRM
+        # (ver taxa_fixa.py) — usa-se o limite MENOR do intervalo de anos
+        # (avisa cedo). concluded_on_crm é a data real de conclusão
+        # (closingValues.concludedOn), não uma aproximação.
         lo = rng_lo if has_range else today
         hi = rng_hi if has_range else today + timedelta(days=90)
-        procs = sb.table("processos").select(
-            "id, cliente_id, taxa_fixa_ate, taxa_tipo, valor_credito, consultor_id"
-        ).gte("taxa_fixa_ate", lo.isoformat()).lte("taxa_fixa_ate", hi.isoformat()).execute().data
-        cli = {c["id"]: c for c in sb.table("clientes").select("id, nome, telefone").execute().data}
-        ges = {g["id"]: g["nome"] for g in sb.table("gestores").select("id, nome").execute().data}
+        clientes = _select_all(sb, "clientes_real", "crm_id, name, telephone")
+        cli_by_id = {c["crm_id"]: c for c in clientes}
+        processos = _select_all(
+            sb, "processos_real",
+            "crm_id, customer_crm_id, state_name, manager_name, "
+            "financing_amount, financing_amount_finished, "
+            "taxa_tipo, taxa_fixa_anos_min, concluded_on_crm",
+        )
         out = []
-        for p in procs:
-            c = cli.get(p["cliente_id"]) or {}
+        for p in processos:
+            if p.get("state_name") not in GANHO_STATE_NAMES:
+                continue
+            anos = p.get("taxa_fixa_anos_min")
+            concl = _parse(p.get("concluded_on_crm"))
+            if not anos or not concl:
+                continue
+            try:
+                fim = concl.replace(year=concl.year + anos)
+            except ValueError:
+                fim = concl.replace(year=concl.year + anos, day=28)
+            if has_range:
+                if not (rng_lo <= fim <= rng_hi):
+                    continue
+            elif not (lo <= fim <= hi):
+                continue
+            cid = p.get("customer_crm_id")
+            c = cli_by_id.get(cid) or {}
             out.append({
-                "processo_id": p["id"],
-                "cliente_id": p["cliente_id"],
-                "nome": c.get("nome"),
-                "telefone": c.get("telefone"),
-                "gestor": ges.get(p.get("consultor_id")),
-                "taxa_fixa_ate": p.get("taxa_fixa_ate"),
+                "cliente_id": str(cid),
+                "cliente_crm_id": cid,
+                "processo_crm_id": p["crm_id"],
+                "nome": c.get("name"),
+                "telefone": c.get("telephone"),
+                "gestor": p.get("manager_name"),
+                "taxa_fixa_fim": fim.isoformat(),
                 "taxa_tipo": p.get("taxa_tipo"),
-                "valor_credito": p.get("valor_credito"),
-                "data_source": "mock",
+                "valor_credito": valor_financiamento(p),
+                "data_source": "live_approx",
             })
-        return {"trigger": trigger, "rows": sorted(out, key=lambda r: r["taxa_fixa_ate"])}
+        return {"trigger": trigger, "rows": sorted(out, key=lambda r: r["taxa_fixa_fim"])}
 
     if trigger == "doc_atraso":
         processos = _select_all(
