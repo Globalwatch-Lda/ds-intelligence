@@ -15,6 +15,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -27,6 +28,7 @@ from ..core.crypto import hash_password, verify_password
 from ..core.mailer import branded_email, send_email
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 COOKIE_NAME = "ds_session"
 MAX_AGE = 7 * 24 * 3600  # 7 days
@@ -71,8 +73,19 @@ def _users() -> dict[str, str]:
             data = json.loads(settings.APP_USERS)
             if isinstance(data, dict):
                 users.update({str(k): str(v) for k, v in data.items() if v})
-        except (ValueError, TypeError):
-            pass
+            else:
+                log.error(
+                    "APP_USERS nao e um objecto JSON (e %s) — as contas de recurso "
+                    "declaradas ali NAO existem.", type(data).__name__
+                )
+        except (ValueError, TypeError) as exc:
+            # Um APP_USERS mal escrito (p.ex. {bs:x} sem aspas) e JSON invalido:
+            # engolir isto em silencio deixava o fallback INERTE sem nada o dizer,
+            # e so se descobria no dia em que a base ficasse inalcancavel.
+            log.error(
+                "APP_USERS invalido (%s) — as contas de recurso declaradas ali NAO "
+                "existem. Tem de ser JSON com aspas: {\"utilizador\": \"senha\"}.", exc
+            )
     if settings.APP_PASSWORD:
         users.setdefault(settings.APP_USER, settings.APP_PASSWORD)
     return users
@@ -126,14 +139,36 @@ def login(body: LoginIn, response: Response):
     # 1) DB-backed platform users (source of truth). 2) env shared credentials
     # (`ds`/`amin` admin/test logins) as a fallback so nobody is locked out.
     db_row = _db_user(uname)
+    ok = False
     if db_row:
         ok = verify_password(body.password or "", db_row.get("password_hash"), db_row.get("password_salt"))
-    else:
+
+    # O fallback do .env corre SEMPRE que a base nao autenticou — nao apenas
+    # quando a linha nao existe. Ate 14 ago 2026 era `if db_row: ... else: ...`,
+    # portanto bastava EXISTIR linha para o fallback ficar inacessivel, mesmo
+    # havendo credencial de recurso declarada no .env para esse mesmo nome: uma
+    # conta cuja password ninguem soubesse (ou que nascesse sem hash) ficava
+    # presa, e sem email preenchido o "esqueci-me da palavra-passe" tambem nao a
+    # salvava. Alcance: isto so cobre os nomes declarados em APP_USER/APP_USERS —
+    # uma conta que so exista na base continua a depender da reposicao.
+    #
+    # ⚠️ O PRECO, e e deliberado: a credencial do .env continua a valer para esse
+    # nome mesmo depois de a conta ter password propria na base. Uma password de
+    # recurso que nunca morre so se justifica se alguem a vir usar — dai o aviso
+    # no log em vez de um sucesso silencioso.
+    if not ok:
         users = _users()
-        if not users:
+        if not users and not db_row:
             raise HTTPException(503, "Login não configurado no servidor.")
         expected = users.get(uname)
         ok = bool(expected) and hmac.compare_digest(body.password or "", expected)
+        if ok and db_row:
+            # Nao e silencioso de proposito: a conta tem password propria na base
+            # e entrou pela credencial partilhada, o que e recuperacao e nao rotina.
+            log.warning(
+                "login de '%s' pelo fallback do .env — a password na base nao "
+                "confere. Reponha-a para o fallback deixar de ser preciso.", uname
+            )
     if not ok:
         raise HTTPException(401, "Credenciais inválidas.")
 
