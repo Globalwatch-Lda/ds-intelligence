@@ -80,7 +80,8 @@ def dashboard_kpis(request: Request):
         sb, "processos_real",
         "crm_id, customer_crm_id, customer_name, state_id, state_name, "
         "type_name, docs_mandatory, docs_uploaded, docs_validated, "
-        "updated_on_crm, created_on_crm, archived",
+        "updated_on_crm, created_on_crm, archived, "
+        "taxa_tipo, taxa_fixa_anos_min, concluded_on_crm",
         scope=scope,
     )
     leads = _select_all(
@@ -150,6 +151,27 @@ def dashboard_kpis(request: Request):
     escritura_6m = _anniversary_hits(6)
     escritura_12m = _anniversary_hits(12)
 
+    # ---- taxa fixa/mista a terminar em 90 dias (LIVE, best-effort) ----
+    # taxa_tipo/taxa_fixa_anos_min vêm de texto livre (ver taxa_fixa.py) — usa-se
+    # o limite MENOR do intervalo de anos (ex. "2 a 5 anos" -> 2), para avisar
+    # cedo em vez de tarde. concluded_on_crm é a data real de conclusão
+    # (closingValues.concludedOn), não uma aproximação.
+    d_plus_90 = _add_days(90)
+    taxa_fixa_90d = []
+    for p in processos:
+        if p.get("state_name") not in GANHO_STATE_NAMES:
+            continue
+        anos = p.get("taxa_fixa_anos_min")
+        concl = _parse_iso_date(p.get("concluded_on_crm"))
+        if not anos or not concl:
+            continue
+        try:
+            fim = concl.replace(year=concl.year + anos)
+        except ValueError:
+            fim = concl.replace(year=concl.year + anos, day=28)  # 29 fev em ano não bissexto
+        if today <= fim <= d_plus_90:
+            taxa_fixa_90d.append(p)
+
     # ---- leads Pendente dormentes (LIVE) ----
     # state Pendente + not updated in 30+ days = reactivation pool (per Bruno's
     # iteration 4 "Reativações" reframe)
@@ -217,11 +239,15 @@ def dashboard_kpis(request: Request):
             },
             {
                 "key": "taxa_fixa_90d",
-                "label": "Taxa fixa a terminar (90 dias)",
-                "value": 0,
+                "label": "Taxa fixa/mista a terminar (90 dias)",
+                "value": len(taxa_fixa_90d),
                 "intent": "comercial",
-                "data_source": "pending_integration",
-                "note": "Campo taxa-fixa-fim ainda por mapear no detalhe do processo",
+                "data_source": "live_best_effort",
+                "note": (
+                    "Extraído de texto livre do CRM (preferência do cliente, não campo "
+                    "estruturado) — usa o limite menor do intervalo de anos indicado; "
+                    "só conta processos onde essa preferência foi mesmo mencionada."
+                ),
             },
             {
                 "key": "docs_atraso",
