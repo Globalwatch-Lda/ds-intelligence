@@ -83,10 +83,10 @@ def _consultor_instance(sb, consultor_id: str) -> str | None:
     return None
 
 
-def _welcome_template(loja: str) -> str:
+def _welcome_template() -> str:
     return (
         "Olá {{nome_cliente}}, é o {{nome_consultor}}.\n\n"
-        f"Quero informar que, desde já, estou a colaborar com a {loja} "
+        "Quero informar que, desde já, estou a colaborar com a {{nome_loja}} "
         "como consultor de crédito e seguros. Terei muito gosto em ser-lhe útil "
         "sempre que necessitar — análise de crédito habitação, refinanciamento, "
         "revisão de seguros ou qualquer outra questão financeira.\n\n"
@@ -98,13 +98,14 @@ def _welcome_template(loja: str) -> str:
 def _render(template: str, nome_consultor: str, nome_cliente: str) -> str:
     return (template
             .replace("{{nome_consultor}}", nome_consultor or "")
-            .replace("{{nome_cliente}}", nome_cliente or ""))
+            .replace("{{nome_cliente}}", nome_cliente or "")
+            .replace("{{nome_loja}}", settings.LOJA_NAME))
 
 
 # --------------------------------------------------------- contacts CRUD
 @router.get("/welcome-template")
 def get_welcome_template():
-    return {"template": _welcome_template(settings.LOJA_NAME)}
+    return {"template": _welcome_template()}
 
 
 @router.get("/consultores")
@@ -215,7 +216,7 @@ def preview_broadcast(body: BroadcastBody):
     sb = supabase()
     nome_consultor = fix_name(body.consultor_id) or body.consultor_id
     contactos = body.destinatarios if body.destinatarios else _clientes_do_gestor(sb, body.consultor_id)
-    template = body.template or _welcome_template(settings.LOJA_NAME)
+    template = body.template or _welcome_template()
     sample = contactos[0] if contactos else {"nome_cliente": "(exemplo)"}
     instance = _consultor_instance(sb, body.consultor_id)
     return {
@@ -240,7 +241,7 @@ def send_broadcast(body: BroadcastBody, request: Request):
     if not contactos:
         raise HTTPException(400, "Sem destinatários (nenhum contacto com telefone).")
 
-    template = body.template or _welcome_template(settings.LOJA_NAME)
+    template = body.template or _welcome_template()
     instance = _consultor_instance(sb, body.consultor_id)
     user = token_user(request.cookies.get(COOKIE_NAME))
 

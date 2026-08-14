@@ -216,7 +216,7 @@ export default function ContactosPage() {
                   </div>
                 </div>
                 <textarea value={tipo === 'welcome' ? welcomeMsg : customMsg} onChange={(e) => (tipo === 'welcome' ? setWelcomeMsg : setCustomMsg)(e.target.value)} rows={tipo === 'welcome' ? 6 : 4} className="w-full rounded-xl border border-ink-100 px-3 py-2 text-sm" />
-                <p className="text-xs text-ink-400">Placeholders: <code>{'{{nome_consultor}}'}</code>, <code>{'{{nome_cliente}}'}</code> — substituídos por destinatário.</p>
+                <p className="text-xs text-ink-400">Placeholders: <code>{'{{nome_consultor}}'}</code>, <code>{'{{nome_cliente}}'}</code>, <code>{'{{nome_loja}}'}</code> — substituídos por destinatário.</p>
                 <div className="flex flex-wrap items-center gap-3">
                   <button onClick={previewBroadcast} disabled={alvoCount === 0} className="btn-primary">Pré-visualizar e enviar</button>
                   <span className="text-sm text-ink-500">Alvo: <b>{alvoCount}</b> {selected.size > 0 ? 'selecionados' : 'contactos (todos)'}</span>
