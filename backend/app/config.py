@@ -85,6 +85,10 @@ class Settings:
 settings = Settings()
 
 
+_loja_nome_cache: dict[str, object] = {"valor": None, "expira_em": 0.0}
+_LOJA_NOME_TTL_S = 60
+
+
 def loja_nome() -> str:
     """Nome da loja para templates/mensagens ({loja}, {{nome_loja}}, etc.).
 
@@ -92,21 +96,35 @@ def loja_nome() -> str:
     no LOJA_NAME do .env se a BD ainda não tiver nada guardado ou estiver
     inacessível. Antes desta função havia duas fontes independentes (o .env
     e a BD) que podiam divergir silenciosamente — ver worklog 14 ago 2026.
-    Import de .db feito aqui dentro (não no topo do módulo) para evitar
-    import circular: db.py já importa `settings` deste ficheiro.
+
+    Cache em memória de 60s: esta função passou a ser chamada em quase todos
+    os endpoints (aniversário, escrituras, taxa fixa, docs, newsletter, chat,
+    emails...) — sem cache, cada pedido do utilizador passou a custar +1
+    round-trip ao Supabase. Combinado com uma ligação instável já conhecida
+    (ConnectionTerminated intermitente), isso chegou a pendurar o worker
+    inteiro (--workers 1) por até 120s num único pedido. O nome da loja muda
+    tão raramente que 60s de atraso a refletir uma edição em Configurações é
+    imperceptível na prática.
     """
+    import time
+    agora = time.monotonic()
+    if _loja_nome_cache["valor"] is not None and agora < _loja_nome_cache["expira_em"]:
+        return _loja_nome_cache["valor"]  # type: ignore[return-value]
+
+    nome = settings.LOJA_NAME
     try:
         from .db import supabase
         row = (
             supabase().table("loja_config").select("nome").eq("id", 1).limit(1).execute().data
             or [None]
         )[0]
-        nome = (row or {}).get("nome")
-        if nome:
-            return nome
+        nome = (row or {}).get("nome") or settings.LOJA_NAME
     except Exception:
-        pass
-    return settings.LOJA_NAME
+        pass  # BD inacessível/lenta: usa o .env desta vez, sem bloquear o pedido
+
+    _loja_nome_cache["valor"] = nome
+    _loja_nome_cache["expira_em"] = agora + _LOJA_NOME_TTL_S
+    return nome
 
 
 def loja_nome_curto() -> str:

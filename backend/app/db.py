@@ -20,5 +20,10 @@ def supabase() -> Client:
     return create_client(
         settings.SUPABASE_URL,
         settings.SUPABASE_SERVICE_ROLE_KEY,
-        options=ClientOptions(schema=settings.DB_SCHEMA),
+        # Default é 120s — uma única ligação lenta/instável ao Supabase (já visto
+        # antes, ConnectionTerminated intermitente) prendia o worker uvicorn
+        # (--workers 1) até 2 minutos por pedido, sem responder a mais nada
+        # entretanto. 15s é generoso para qualquer query desta app e falha rápido
+        # em vez de pendurar o servidor inteiro. Ver worklog 14 ago 2026.
+        options=ClientOptions(schema=settings.DB_SCHEMA, postgrest_client_timeout=15),
     )
