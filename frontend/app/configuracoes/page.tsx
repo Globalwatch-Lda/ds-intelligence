@@ -4,7 +4,12 @@ import useSWR, { useSWRConfig } from 'swr';
 import { api } from '../../lib/api';
 import { useMe } from '../../lib/useMe';
 
-type UserRow = { id: number; username: string; nome: string | null; role: string; manager_id: number | null; is_active: boolean };
+type UserRow = { id: number; username: string; nome: string | null; role: string; manager_id: number | null; is_active: boolean; last_login_at?: string | null };
+
+function fmtLogin(iso: string | null | undefined): string {
+  if (!iso) return 'nunca entrou';
+  return 'último login ' + new Date(iso).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
 type Acting = { id: number | null; role: string; loja_manager: boolean; can_manage: boolean };
 type UsersResp = { users: UserRow[]; acting: Acting };
 type Manager = { crm_id: number; nome: string | null };
@@ -282,6 +287,7 @@ function UtilizadoresTab({ canSync }: { canSync: boolean }) {
             <span className="min-w-0">
               <span className="block truncate">{u.nome ?? u.username}</span>
               <span className="block truncate text-[11px] text-ink-400">{roleLabel[u.role] ?? u.role}</span>
+              <span className="block truncate text-[11px] text-ink-400" title={u.last_login_at ?? undefined}>{fmtLogin(u.last_login_at)}</span>
             </span>
           </button>
         ))}

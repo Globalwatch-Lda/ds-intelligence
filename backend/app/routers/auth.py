@@ -172,6 +172,19 @@ def login(body: LoginIn, response: Response):
     if not ok:
         raise HTTPException(401, "Credenciais inválidas.")
 
+    # Rasto do login: no journal sempre (inclui contas só de .env) e na base
+    # para quem tem linha. Best-effort — falhar a gravar nunca bloqueia a entrada.
+    log.info("login ok: %s", uname)
+    if db_row:
+        try:
+            from ..db import supabase
+
+            supabase().table("platform_users").update(
+                {"last_login_at": datetime.now(timezone.utc).isoformat()}
+            ).eq("id", db_row["id"]).execute()
+        except Exception as exc:
+            log.warning("nao consegui gravar last_login_at de '%s': %s", uname, exc)
+
     response.set_cookie(
         COOKIE_NAME,
         make_token(uname),

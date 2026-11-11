@@ -148,7 +148,7 @@ def list_users(request: Request):
     sb = supabase()
     loja_manager = _is_loja_manager(request, acting)
     can_manage = has_cap(request, "users.manage")
-    q = sb.table("platform_users").select("id, username, nome, role, manager_id, equipa_id, is_active").order("id")
+    q = sb.table("platform_users").select("id, username, nome, role, manager_id, equipa_id, is_active, last_login_at").order("id")
     if loja_manager:
         pass  # all users in the loja
     elif can_manage:
